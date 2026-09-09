@@ -7,6 +7,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import apiClient from "../api/client";
 import { ENDPOINTS } from "../api/endpoints";
+import { config } from "../constants/config";
 import { secureStorage } from "../storage/secureStorage";
 import { User, UserRole } from "../types";
 
@@ -76,12 +77,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     password: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      console.log(`[AuthContext.login] Request: POST ${config.apiBaseUrl}${ENDPOINTS.AUTH.LOGIN}`, {
+        email: email.trim().toLowerCase(),
+      });
+
       const response = await apiClient.post(ENDPOINTS.AUTH.LOGIN, {
         email: email.trim().toLowerCase(),
         password,
       });
 
       const { access_token, user: loggedInUser } = response.data;
+
+      console.log(`[AuthContext.login] Success: HTTP ${response.status}`, {
+        userId: loggedInUser?.id,
+        email: loggedInUser?.email,
+        role: loggedInUser?.role,
+        hasToken: !!access_token,
+      });
 
       await secureStorage.saveToken(access_token);
       await secureStorage.saveUser(loggedInUser);
@@ -91,8 +103,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return { success: true };
     } catch (err: any) {
-      const message =
-        err.response?.data?.detail || "Invalid email or password. Please check your credentials.";
+      console.error("[AuthContext.login] Error:", {
+        url: `${err.config?.baseURL || ""}${err.config?.url || ""}`,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        message: err.message,
+      });
+
+      let message = "Invalid email or password. Please check your credentials.";
+      if (err.response?.data?.detail) {
+        if (typeof err.response.data.detail === "string") {
+          message = err.response.data.detail;
+        } else if (Array.isArray(err.response.data.detail)) {
+          message = err.response.data.detail
+            .map((d: any) => (typeof d.msg === "string" ? d.msg.replace(/^Value error,\s*/i, "") : JSON.stringify(d)))
+            .join("; ");
+        }
+      } else if (err.response?.status >= 500) {
+        message = `Server error (${err.response.status}). Please try again later.`;
+      } else if (!err.response) {
+        message = `Unable to connect to server at ${config.apiBaseUrl}. Please ensure backend is running.`;
+      }
       return { success: false, error: message };
     }
   };
@@ -106,6 +138,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     emergencyContact?: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      console.log(`[AuthContext.register] Request: POST ${config.apiBaseUrl}${ENDPOINTS.AUTH.REGISTER}`, {
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        emergencyContact: emergencyContact ? emergencyContact.trim() : undefined,
+        fieldNames: ["fullName", "email", "password", "confirmPassword", "role", ...(emergencyContact ? ["emergencyContact"] : [])],
+      });
+
       const response = await apiClient.post(ENDPOINTS.AUTH.REGISTER, {
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
@@ -115,23 +155,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         emergencyContact: emergencyContact ? emergencyContact.trim() : undefined,
       });
 
-      const { access_token, user: registeredUser } = response.data;
-
-      await secureStorage.saveToken(access_token);
-      await secureStorage.saveUser(registeredUser);
-
-      setToken(access_token);
-      setUser(registeredUser);
+      console.log(`[AuthContext.register] Success: HTTP ${response.status}`, {
+        userId: response.data?.user?.id,
+        email: response.data?.user?.email,
+        role: response.data?.user?.role,
+      });
 
       return { success: true };
     } catch (err: any) {
+      console.error("[AuthContext.register] Error:", {
+        url: `${err.config?.baseURL || ""}${err.config?.url || ""}`,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        message: err.message,
+      });
+
       let message = "Registration failed. Please check your details and try again.";
       if (err.response?.data?.detail) {
         if (typeof err.response.data.detail === "string") {
           message = err.response.data.detail;
         } else if (Array.isArray(err.response.data.detail)) {
-          message = err.response.data.detail[0]?.msg || message;
+          message = err.response.data.detail
+            .map((d: any) => (typeof d.msg === "string" ? d.msg.replace(/^Value error,\s*/i, "") : JSON.stringify(d)))
+            .join("; ");
         }
+      } else if (err.response?.data?.message) {
+        message = err.response.data.message;
+      } else if (err.response?.status >= 500) {
+        message = `Server error (${err.response.status}). Please try again later.`;
+      } else if (!err.response) {
+        message = `Unable to connect to server at ${config.apiBaseUrl}. Please ensure backend is running.`;
       }
       return { success: false, error: message };
     }

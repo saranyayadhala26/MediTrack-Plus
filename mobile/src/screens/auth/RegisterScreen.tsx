@@ -67,7 +67,9 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToLogi
     );
     setLoading(false);
 
-    if (!result.success && result.error) {
+    if (result.success) {
+      onNavigateToLogin();
+    } else if (result.error) {
       setError(result.error);
     }
   };
