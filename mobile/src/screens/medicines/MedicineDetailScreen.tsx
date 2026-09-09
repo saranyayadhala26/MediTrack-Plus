@@ -24,6 +24,7 @@ import { ScheduleCard } from "../../components/schedules/ScheduleCard";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
+import { notificationService } from "../../services/notificationService";
 import { MedicationSchedule, Medicine } from "../../types";
 
 interface MedicineDetailScreenProps {
@@ -66,6 +67,11 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
     try {
       const updated = await updateSchedule(sched.id, { enabled: !sched.enabled });
       setSchedules((prev) => prev.map((s) => (s.id === sched.id ? updated : s)));
+      try {
+        await notificationService.syncScheduleReminder(updated);
+      } catch (notifErr) {
+        console.warn("Failed to sync reminder status:", notifErr);
+      }
     } catch {
       Alert.alert("Error", "Failed to update schedule status.");
     }
@@ -81,6 +87,11 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
           try {
             await deleteSchedule(sched.id);
             setSchedules((prev) => prev.filter((s) => s.id !== sched.id));
+            try {
+              await notificationService.cancelScheduleReminder(sched.id);
+            } catch (notifErr) {
+              console.warn("Failed to cancel schedule reminder:", notifErr);
+            }
           } catch {
             Alert.alert("Error", "Failed to delete schedule.");
           }
@@ -102,6 +113,10 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
     setDeleteError(null);
     try {
       await deleteMedicine(medicine.id);
+      // Cancel local reminders for all schedules linked to this deleted medicine
+      for (const s of schedules) {
+        notificationService.cancelScheduleReminder(s.id).catch(() => {});
+      }
       Alert.alert("Deleted", `"${medicine.name}" has been removed from your list.`, [
         { text: "OK", onPress: onDeleted },
       ]);

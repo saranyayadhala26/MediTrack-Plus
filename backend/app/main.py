@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
-from app.routers import auth, health, medicines, schedules
+from app.routers import auth, health, medicines, notifications, schedules
 
 # Setup logging
 logging.basicConfig(
@@ -67,3 +67,4 @@ app.include_router(health.router)  # Also expose /health at root for cloud healt
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth")
 app.include_router(medicines.router, prefix=f"{settings.API_V1_PREFIX}/medicines")
 app.include_router(schedules.router, prefix=f"{settings.API_V1_PREFIX}/schedules")
+app.include_router(notifications.router, prefix=f"{settings.API_V1_PREFIX}/notifications")

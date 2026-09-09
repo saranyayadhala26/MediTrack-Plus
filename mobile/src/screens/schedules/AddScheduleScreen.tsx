@@ -23,6 +23,7 @@ import { Card } from "../../components/common/Card";
 import { Input } from "../../components/common/Input";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { notificationService } from "../../services/notificationService";
 import { Medicine, ScheduleFrequency } from "../../types";
 
 interface AddScheduleScreenProps {
@@ -185,7 +186,12 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
         enabled,
       };
 
-      await createSchedule(payload);
+      const createdSchedule = await createSchedule(payload);
+      try {
+        await notificationService.scheduleScheduleReminder(createdSchedule);
+      } catch (notifErr) {
+        console.warn("Failed to schedule local reminder:", notifErr);
+      }
       Alert.alert(
         "Schedule Created",
         `Reminder set for ${selectedMed.name} at ${payload.time}.`,

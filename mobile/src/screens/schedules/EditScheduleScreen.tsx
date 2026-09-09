@@ -22,6 +22,7 @@ import { Card } from "../../components/common/Card";
 import { Input } from "../../components/common/Input";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { notificationService } from "../../services/notificationService";
 import { MedicationSchedule, ScheduleFrequency } from "../../types";
 
 interface EditScheduleScreenProps {
@@ -153,6 +154,11 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
       };
 
       const updated = await updateSchedule(schedule.id, payload);
+      try {
+        await notificationService.syncScheduleReminder(updated);
+      } catch (notifErr) {
+        console.warn("Failed to sync local reminder:", notifErr);
+      }
       Alert.alert("Schedule Updated", `Reminder updated to ${updated.time}.`, [
         {
           text: "OK",

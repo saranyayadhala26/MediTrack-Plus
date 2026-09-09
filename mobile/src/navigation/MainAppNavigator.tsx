@@ -4,7 +4,7 @@
  * and Medication Reminder Scheduling.
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
   StyleSheet,
@@ -12,6 +12,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { getMedicineById } from "../api/medicines";
+import { getSchedules } from "../api/schedules";
 import { borderRadius, colors, spacing, typography } from "../constants/theme";
 import { HomeScreen } from "../screens/main/HomeScreen";
 import { AddMedicineScreen } from "../screens/medicines/AddMedicineScreen";
@@ -20,6 +22,7 @@ import { MedicineDetailScreen } from "../screens/medicines/MedicineDetailScreen"
 import { MedicineListScreen } from "../screens/medicines/MedicineListScreen";
 import { AddScheduleScreen } from "../screens/schedules/AddScheduleScreen";
 import { EditScheduleScreen } from "../screens/schedules/EditScheduleScreen";
+import { notificationService } from "../services/notificationService";
 import { MedicationSchedule, Medicine } from "../types";
 
 type MainTab = "dashboard" | "medicines";
@@ -36,6 +39,50 @@ export const MainAppNavigator: React.FC = () => {
   const [medicineMode, setMedicineMode] = useState<MedicineScreenMode>("list");
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
   const [selectedSchedule, setSelectedSchedule] = useState<MedicationSchedule | null>(null);
+
+  // Setup notification channel, sync active schedules, and attach tap listener
+  useEffect(() => {
+    let isMounted = true;
+
+    // Initialize notification channel and reconcile existing MongoDB schedules
+    notificationService
+      .initialize()
+      .then(() => getSchedules())
+      .then((res) => {
+        if (isMounted && res?.items) {
+          notificationService.reconcileAllSchedules(res.items).catch(() => {});
+        }
+      })
+      .catch((err) => {
+        console.warn("MainAppNavigator: Error reconciling notifications on launch:", err);
+      });
+
+    // Deep link navigation on notification tap
+    const subscription = notificationService.addNotificationResponseListener((response) => {
+      const data = (response?.notification?.request?.content?.data as any) || {};
+      if (data?.medicineId) {
+        getMedicineById(data.medicineId)
+          .then((med) => {
+            if (isMounted && med) {
+              setSelectedMedicine(med);
+              setActiveTab("medicines");
+              setMedicineMode("detail");
+            }
+          })
+          .catch(() => {
+            if (isMounted) {
+              setActiveTab("medicines");
+              setMedicineMode("list");
+            }
+          });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.remove();
+    };
+  }, []);
 
   const handleNavigateToMedicines = (subScreen?: "list" | "add") => {
     setActiveTab("medicines");

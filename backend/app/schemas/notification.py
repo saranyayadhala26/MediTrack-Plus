@@ -1,9 +1,16 @@
-"""Notification validation schemas."""
+"""Notification validation schemas (Phase 6).
+
+Provides models for medication reminders and notification alerts:
+- Notification types (reminder, snooze, caregiver_alert, system)
+- Read / Unread status tracking
+- Authoritative medical safety disclaimers
+"""
 
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from app.schemas.common import MedicalDisclaimerMixin
 
 
 class NotificationType(str, Enum):
@@ -31,7 +38,7 @@ class NotificationCreate(NotificationBase):
     scheduleId: Optional[str] = Field(None, description="Optional associated schedule ID")
 
 
-class NotificationResponse(NotificationBase):
+class NotificationResponse(NotificationBase, MedicalDisclaimerMixin):
     id: str = Field(..., description="Notification unique identifier")
     userId: str = Field(..., description="Recipient user ID")
     caregiverId: Optional[str] = None
@@ -46,7 +53,7 @@ class NotificationResponse(NotificationBase):
     }
 
 
-class NotificationListResponse(BaseModel):
+class NotificationListResponse(MedicalDisclaimerMixin):
     items: List[NotificationResponse] = Field(default_factory=list)
     total: int = 0
     unreadCount: int = 0

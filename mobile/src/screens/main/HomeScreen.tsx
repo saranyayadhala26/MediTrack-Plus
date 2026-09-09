@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { NotificationStatusCard } from "../../components/notifications/NotificationStatusCard";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
@@ -88,6 +89,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToMedicines })
             )}
           </View>
         </Card>
+
+        {/* Phase 6: Local Medication Reminders & Alerts */}
+        <NotificationStatusCard />
 
         {/* Account Profile Card */}
         <Card style={styles.card}>
