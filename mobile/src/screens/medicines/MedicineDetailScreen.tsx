@@ -4,7 +4,7 @@
  * inventory/refill alerts, mandatory medical disclaimer, and actions (Edit / Delete).
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Modal,
@@ -17,18 +17,22 @@ import {
   View,
 } from "react-native";
 import { deleteMedicine } from "../../api/medicines";
+import { deleteSchedule, getSchedules, updateSchedule } from "../../api/schedules";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { ScheduleCard } from "../../components/schedules/ScheduleCard";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
-import { Medicine } from "../../types";
+import { MedicationSchedule, Medicine } from "../../types";
 
 interface MedicineDetailScreenProps {
   medicine: Medicine;
   onBack: () => void;
   onEdit: (medicine: Medicine) => void;
   onDeleted: () => void;
+  onAddSchedule?: (medicine: Medicine) => void;
+  onEditSchedule?: (schedule: MedicationSchedule) => void;
 }
 
 export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
@@ -36,13 +40,54 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
   onBack,
   onEdit,
   onDeleted,
+  onAddSchedule,
+  onEditSchedule,
 }) => {
   const { user } = useAuth();
   const isCaregiver = user?.role === "caregiver";
 
+  const [schedules, setSchedules] = useState<MedicationSchedule[]>([]);
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCaregiver) {
+      setIsLoadingSchedules(true);
+      getSchedules(medicine.id)
+        .then((res) => setSchedules(res.items || []))
+        .catch(() => {})
+        .finally(() => setIsLoadingSchedules(false));
+    }
+  }, [medicine.id, isCaregiver]);
+
+  const handleToggleSchedule = async (sched: MedicationSchedule) => {
+    try {
+      const updated = await updateSchedule(sched.id, { enabled: !sched.enabled });
+      setSchedules((prev) => prev.map((s) => (s.id === sched.id ? updated : s)));
+    } catch {
+      Alert.alert("Error", "Failed to update schedule status.");
+    }
+  };
+
+  const handleDeleteSchedule = (sched: MedicationSchedule) => {
+    Alert.alert("Delete Reminder", `Delete reminder for ${sched.time}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteSchedule(sched.id);
+            setSchedules((prev) => prev.filter((s) => s.id !== sched.id));
+          } catch {
+            Alert.alert("Error", "Failed to delete schedule.");
+          }
+        },
+      },
+    ]);
+  };
 
   const isLowInventory =
     medicine.inventory !== undefined &&
@@ -159,6 +204,53 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
               {medicine.startDate || "Ongoing"} {medicine.endDate ? `→ ${medicine.endDate}` : ""}
             </Text>
           </View>
+        </Card>
+
+        {/* Reminder Schedules Card */}
+        <Card style={styles.card}>
+          <View style={styles.schedulesHeaderRow}>
+            <Text style={styles.sectionTitle}>Reminder Schedules</Text>
+            {!isCaregiver && onAddSchedule && (
+              <Button
+                title="+ Add Time"
+                onPress={() => onAddSchedule(medicine)}
+                variant="outline"
+                style={styles.addTimeButton}
+              />
+            )}
+          </View>
+
+          {isLoadingSchedules ? (
+            <Text style={styles.loadingSchedulesText}>Loading reminder times...</Text>
+          ) : schedules.length === 0 ? (
+            <View style={styles.emptySchedulesBox}>
+              <Text style={styles.emptySchedulesTitle}>No Reminders Set</Text>
+              <Text style={styles.emptySchedulesText}>
+                Configure intake times to ensure you never miss a dose.
+              </Text>
+              {!isCaregiver && onAddSchedule && (
+                <Button
+                  title="+ Set Reminder Schedule"
+                  onPress={() => onAddSchedule(medicine)}
+                  variant="primary"
+                  style={styles.setScheduleButton}
+                />
+              )}
+            </View>
+          ) : (
+            <View style={styles.schedulesList}>
+              {schedules.map((sched) => (
+                <ScheduleCard
+                  key={sched.id}
+                  schedule={sched}
+                  showMedicineName={false}
+                  onToggleEnabled={handleToggleSchedule}
+                  onEdit={isCaregiver ? undefined : onEditSchedule}
+                  onDelete={isCaregiver ? undefined : handleDeleteSchedule}
+                />
+              ))}
+            </View>
+          )}
         </Card>
 
         {/* Supply & Inventory Status Card */}
@@ -486,6 +578,47 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.secondaryDark,
     textAlign: "center",
+  },
+  schedulesHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  addTimeButton: {
+    paddingHorizontal: spacing.md,
+    minHeight: 36,
+  },
+  loadingSchedulesText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontStyle: "italic",
+    paddingVertical: spacing.sm,
+  },
+  emptySchedulesBox: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    alignItems: "center",
+    marginVertical: spacing.xs,
+  },
+  emptySchedulesTitle: {
+    ...typography.caption,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  emptySchedulesText: {
+    ...typography.small,
+    color: colors.textMuted,
+    textAlign: "center",
+    marginBottom: spacing.sm,
+  },
+  setScheduleButton: {
+    minWidth: 160,
+  },
+  schedulesList: {
+    marginTop: spacing.xs,
   },
   modalOverlay: {
     flex: 1,

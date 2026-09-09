@@ -1,7 +1,7 @@
 /**
- * Authenticated App Navigator (Phase 4).
- * Senior-friendly Tab and Stack routing for Dashboard and Prescribed Medicines.
- * Manages transitions between Medicine List, Detail, Add, and Edit screens.
+ * Authenticated App Navigator (Phase 5).
+ * Senior-friendly Tab and Stack routing for Dashboard, Prescribed Medicines,
+ * and Medication Reminder Scheduling.
  */
 
 import React, { useState } from "react";
@@ -18,15 +18,24 @@ import { AddMedicineScreen } from "../screens/medicines/AddMedicineScreen";
 import { EditMedicineScreen } from "../screens/medicines/EditMedicineScreen";
 import { MedicineDetailScreen } from "../screens/medicines/MedicineDetailScreen";
 import { MedicineListScreen } from "../screens/medicines/MedicineListScreen";
-import { Medicine } from "../types";
+import { AddScheduleScreen } from "../screens/schedules/AddScheduleScreen";
+import { EditScheduleScreen } from "../screens/schedules/EditScheduleScreen";
+import { MedicationSchedule, Medicine } from "../types";
 
 type MainTab = "dashboard" | "medicines";
-type MedicineScreenMode = "list" | "detail" | "add" | "edit";
+type MedicineScreenMode =
+  | "list"
+  | "detail"
+  | "add"
+  | "edit"
+  | "addSchedule"
+  | "editSchedule";
 
 export const MainAppNavigator: React.FC = () => {
   const [activeTab, setActiveTab] = useState<MainTab>("dashboard");
   const [medicineMode, setMedicineMode] = useState<MedicineScreenMode>("list");
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
+  const [selectedSchedule, setSelectedSchedule] = useState<MedicationSchedule | null>(null);
 
   const handleNavigateToMedicines = (subScreen?: "list" | "add") => {
     setActiveTab("medicines");
@@ -76,6 +85,14 @@ export const MainAppNavigator: React.FC = () => {
               setSelectedMedicine(null);
               setMedicineMode("list");
             }}
+            onAddSchedule={(med) => {
+              setSelectedMedicine(med);
+              setMedicineMode("addSchedule");
+            }}
+            onEditSchedule={(sched) => {
+              setSelectedSchedule(sched);
+              setMedicineMode("editSchedule");
+            }}
           />
         );
 
@@ -97,6 +114,38 @@ export const MainAppNavigator: React.FC = () => {
             onBack={() => setMedicineMode("detail")}
             onSuccess={(updated) => {
               setSelectedMedicine(updated);
+              setMedicineMode("detail");
+            }}
+          />
+        );
+
+      case "addSchedule":
+        return (
+          <AddScheduleScreen
+            initialMedicine={selectedMedicine || undefined}
+            onBack={() => setMedicineMode(selectedMedicine ? "detail" : "list")}
+            onSuccess={() => setMedicineMode(selectedMedicine ? "detail" : "list")}
+          />
+        );
+
+      case "editSchedule":
+        if (!selectedSchedule) {
+          return (
+            <MedicineListScreen
+              onSelectMedicine={(med) => {
+                setSelectedMedicine(med);
+                setMedicineMode("detail");
+              }}
+              onAddMedicine={() => setMedicineMode("add")}
+            />
+          );
+        }
+        return (
+          <EditScheduleScreen
+            schedule={selectedSchedule}
+            onBack={() => setMedicineMode("detail")}
+            onSuccess={() => {
+              setSelectedSchedule(null);
               setMedicineMode("detail");
             }}
           />

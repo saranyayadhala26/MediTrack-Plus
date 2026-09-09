@@ -3,12 +3,12 @@
  */
 
 import React from "react";
-import { View, StyleSheet, ViewStyle } from "react-native";
+import { View, StyleSheet, ViewStyle, StyleProp } from "react-native";
 import { colors, borderRadius, spacing } from "../../constants/theme";
 
 interface CardProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   variant?: "default" | "outlined" | "flat";
 }
 

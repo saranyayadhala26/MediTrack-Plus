@@ -64,14 +64,38 @@ export interface MedicationSchedule {
   userId: string;
   medicineId: string;
   medicineName?: string;
+  dosage?: string;
+  dosageUnit?: string;
   time: string; // HH:mm (24-hour format)
   frequencyType: ScheduleFrequency;
   daysOfWeek?: number[]; // 0=Sunday, 1=Monday...
-  startDate: string;
+  dates?: string[]; // Specific dates for custom frequency
+  startDate?: string;
   endDate?: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ScheduleCreatePayload {
+  medicineId: string;
+  time: string;
+  frequencyType: ScheduleFrequency;
+  daysOfWeek?: number[];
+  dates?: string[];
+  startDate?: string;
+  endDate?: string;
+  enabled?: boolean;
+}
+
+export interface ScheduleUpdatePayload {
+  time?: string;
+  frequencyType?: ScheduleFrequency;
+  daysOfWeek?: number[];
+  dates?: string[];
+  startDate?: string;
+  endDate?: string;
+  enabled?: boolean;
 }
 
 export type MedicationActionType = "Taken" | "Skipped" | "Snoozed";

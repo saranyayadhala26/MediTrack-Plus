@@ -79,6 +79,7 @@ def create_schedule_document(
     days_of_week: Optional[List[int]] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    dates: Optional[List[str]] = None,
     enabled: bool = True,
 ) -> Dict[str, Any]:
     """Factory creating a new persistent MedicationSchedule document."""
@@ -91,6 +92,7 @@ def create_schedule_document(
         "daysOfWeek": days_of_week or [],
         "startDate": start_date,
         "endDate": end_date,
+        "dates": dates or [],
         "enabled": enabled,
         "createdAt": now_utc(),
         "updatedAt": now_utc(),
