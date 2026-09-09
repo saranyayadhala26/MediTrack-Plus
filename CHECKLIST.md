@@ -18,12 +18,12 @@
   - [x] Database helper utilities and ObjectId serializers
   - [x] Medical safety disclaimers embedded in schemas
 
-- [ ] **Phase 3: Authentication & User Management**
-  - [ ] UC-01: User registration with input validation (role: Patient / Caregiver)
-  - [ ] UC-02: User login with secure password hashing (Bcrypt) & JWT token issuance
-  - [ ] UC-03: User profile management & emergency contacts
-  - [ ] Auth state persistence in mobile with `AsyncStorage`
-  - [ ] Auth navigation flow & automatic session restoration
+- [x] **Phase 3: Authentication & User Management**
+  - [x] UC-01: User registration with input validation (role: Patient / Caregiver)
+  - [x] UC-02: User login with secure password hashing (Bcrypt) & JWT token issuance
+  - [x] UC-03: User profile management & emergency contacts
+  - [x] Auth state persistence in mobile with `expo-secure-store` (Hardware Keystore)
+  - [x] Auth navigation flow & automatic session restoration
 
 - [ ] **Phase 4: Medicine Management (CRUD)**
   - [ ] UC-04: Add new medicine (name, dosage, frequency, inventory, instructions)

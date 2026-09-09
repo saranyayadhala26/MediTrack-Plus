@@ -1,7 +1,7 @@
 """Security and cryptographic operations module."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any, Dict, Optional, Union
 import bcrypt
 import jwt
 
@@ -28,20 +28,30 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(
     subject: Union[str, Any],
+    role: Optional[str] = None,
+    email: Optional[str] = None,
+    claims: Optional[Dict[str, Any]] = None,
     expires_delta: Optional[timedelta] = None
 ) -> str:
-    """Create a signed JWT access token."""
+    """Create a signed JWT access token containing identity and role claims."""
     now = datetime.now(timezone.utc)
     if expires_delta:
         expire = now + expires_delta
     else:
         expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode = {
+    to_encode: Dict[str, Any] = {
         "sub": str(subject),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
     }
+    if role:
+        to_encode["role"] = role
+    if email:
+        to_encode["email"] = email
+    if claims:
+        to_encode.update(claims)
+
     encoded_jwt = jwt.encode(
         to_encode,
         settings.JWT_SECRET_KEY,
@@ -50,8 +60,8 @@ def create_access_token(
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> Optional[dict]:
-    """Decode and validate a JWT access token."""
+def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    """Decode and validate a JWT access token, returning payload dictionary."""
     try:
         decoded = jwt.decode(
             token,

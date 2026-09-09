@@ -1,5 +1,6 @@
 """MongoDB Atlas connection manager and collection references using PyMongo Async API."""
 
+import asyncio
 import logging
 from typing import Optional
 import pymongo
@@ -120,9 +121,21 @@ async def setup_indexes():
 
 
 def get_database() -> AsyncDatabase:
-    """Return current active database reference."""
-    if db_manager.db is None:
-        raise RuntimeError("Database connection has not been initialized.")
+    """Return current active database reference, ensuring client is bound to the running event loop."""
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if db_manager.client is None or (
+        current_loop is not None and getattr(db_manager.client, "_loop", None) != current_loop
+    ):
+        db_manager.client = AsyncMongoClient(
+            settings.MONGODB_URI,
+            serverSelectionTimeoutMS=5000
+        )
+        db_manager.db = db_manager.client[settings.DATABASE_NAME]
+
     return db_manager.db
 
 
