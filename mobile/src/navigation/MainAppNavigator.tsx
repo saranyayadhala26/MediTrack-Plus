@@ -22,10 +22,11 @@ import { MedicineDetailScreen } from "../screens/medicines/MedicineDetailScreen"
 import { MedicineListScreen } from "../screens/medicines/MedicineListScreen";
 import { AddScheduleScreen } from "../screens/schedules/AddScheduleScreen";
 import { EditScheduleScreen } from "../screens/schedules/EditScheduleScreen";
+import { ActivityHistoryScreen } from "../screens/activities/ActivityHistoryScreen";
 import { notificationService } from "../services/notificationService";
 import { MedicationSchedule, Medicine } from "../types";
 
-type MainTab = "dashboard" | "medicines";
+type MainTab = "dashboard" | "medicines" | "history";
 type MedicineScreenMode =
   | "list"
   | "detail"
@@ -96,6 +97,10 @@ export const MainAppNavigator: React.FC = () => {
   const renderContent = () => {
     if (activeTab === "dashboard") {
       return <HomeScreen onNavigateToMedicines={handleNavigateToMedicines} />;
+    }
+
+    if (activeTab === "history") {
+      return <ActivityHistoryScreen />;
     }
 
     // Active tab is "medicines"
@@ -215,6 +220,7 @@ export const MainAppNavigator: React.FC = () => {
   // Hide bottom tab bar while user is actively filling out Add or Edit forms
   const showTabBar =
     activeTab === "dashboard" ||
+    activeTab === "history" ||
     (activeTab === "medicines" && (medicineMode === "list" || medicineMode === "detail"));
 
   return (
@@ -273,6 +279,31 @@ export const MainAppNavigator: React.FC = () => {
               ]}
             >
               Medicines
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === "history" && styles.tabButtonActive]}
+            onPress={() => setActiveTab("history")}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === "history" }}
+            accessibilityLabel="Activity History Tab"
+          >
+            <Text
+              style={[
+                styles.tabIcon,
+                activeTab === "history" ? styles.tabIconActive : styles.tabIconInactive,
+              ]}
+            >
+              📋
+            </Text>
+            <Text
+              style={[
+                styles.tabLabel,
+                activeTab === "history" ? styles.tabLabelActive : styles.tabLabelInactive,
+              ]}
+            >
+              History
             </Text>
           </TouchableOpacity>
         </View>

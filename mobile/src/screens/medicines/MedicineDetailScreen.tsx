@@ -16,16 +16,18 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { deleteMedicine } from "../../api/medicines";
+import { deleteMedicine, getMedicineById } from "../../api/medicines";
 import { deleteSchedule, getSchedules, updateSchedule } from "../../api/schedules";
+import { getActivitiesByMedicine } from "../../api/activities";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
+import { DoseActionCard } from "../../components/activities/DoseActionCard";
 import { ScheduleCard } from "../../components/schedules/ScheduleCard";
 import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { notificationService } from "../../services/notificationService";
-import { MedicationSchedule, Medicine } from "../../types";
+import { MedicationActivity, MedicationSchedule, Medicine } from "../../types";
 
 interface MedicineDetailScreenProps {
   medicine: Medicine;
@@ -47,11 +49,33 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
   const { user } = useAuth();
   const isCaregiver = user?.role === "caregiver";
 
+  const [currentMed, setCurrentMed] = useState<Medicine>(medicine);
   const [schedules, setSchedules] = useState<MedicationSchedule[]>([]);
   const [isLoadingSchedules, setIsLoadingSchedules] = useState<boolean>(false);
+  const [activities, setActivities] = useState<MedicationActivity[]>([]);
+  const [isLoadingActivities, setIsLoadingActivities] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentMed(medicine);
+  }, [medicine]);
+
+  const loadActivities = () => {
+    setIsLoadingActivities(true);
+    getActivitiesByMedicine(currentMed.id)
+      .then((acts) => setActivities(acts || []))
+      .catch(() => {})
+      .finally(() => setIsLoadingActivities(false));
+
+    // Refresh medicine to reflect updated inventory after doses are taken
+    getMedicineById(currentMed.id)
+      .then((updated) => {
+        if (updated) setCurrentMed(updated);
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     if (!isCaregiver) {
@@ -60,6 +84,9 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
         .then((res) => setSchedules(res.items || []))
         .catch(() => {})
         .finally(() => setIsLoadingSchedules(false));
+      loadActivities();
+    } else {
+      loadActivities();
     }
   }, [medicine.id, isCaregiver]);
 
@@ -101,23 +128,23 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
   };
 
   const isLowInventory =
-    medicine.inventory !== undefined &&
-    medicine.inventory !== null &&
-    medicine.refillThreshold !== undefined &&
-    medicine.refillThreshold !== null &&
-    medicine.inventory <= medicine.refillThreshold;
+    currentMed.inventory !== undefined &&
+    currentMed.inventory !== null &&
+    currentMed.refillThreshold !== undefined &&
+    currentMed.refillThreshold !== null &&
+    currentMed.inventory <= currentMed.refillThreshold;
 
   const performDelete = async () => {
     setShowConfirmModal(false);
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      await deleteMedicine(medicine.id);
+      await deleteMedicine(currentMed.id);
       // Cancel local reminders for all schedules linked to this deleted medicine
       for (const s of schedules) {
         notificationService.cancelScheduleReminder(s.id).catch(() => {});
       }
-      Alert.alert("Deleted", `"${medicine.name}" has been removed from your list.`, [
+      Alert.alert("Deleted", `"${currentMed.name}" has been removed from your list.`, [
         { text: "OK", onPress: onDeleted },
       ]);
     } catch (err: any) {
@@ -221,6 +248,35 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
           </View>
         </Card>
 
+        {/* Today's Dose Actions Card (Phase 7) */}
+        {!isCaregiver && schedules.some((s) => s.enabled) && (
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>Today's Dose Actions</Text>
+            <Text style={styles.doseActionSubtitle}>
+              Record your intake for scheduled doses today:
+            </Text>
+            {schedules
+              .filter((s) => s.enabled)
+              .map((sched) => {
+                const todayStr = new Date().toISOString().split("T")[0];
+                const existingActivity = activities.find(
+                  (a) =>
+                    a.scheduleId === sched.id &&
+                    (a.scheduledDate === todayStr || a.actionTime?.startsWith(todayStr))
+                );
+                return (
+                  <DoseActionCard
+                    key={sched.id}
+                    schedule={sched}
+                    medicine={currentMed}
+                    existingActivity={existingActivity}
+                    onActivityRecorded={loadActivities}
+                  />
+                );
+              })}
+          </Card>
+        )}
+
         {/* Reminder Schedules Card */}
         <Card style={styles.card}>
           <View style={styles.schedulesHeaderRow}>
@@ -272,7 +328,7 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>Supply & Refill Status</Text>
 
-          {medicine.inventory !== undefined && medicine.inventory !== null ? (
+          {currentMed.inventory !== undefined && currentMed.inventory !== null ? (
             <View>
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Units Remaining:</Text>
@@ -282,15 +338,15 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
                     isLowInventory ? styles.lowStockText : styles.inStockText,
                   ]}
                 >
-                  {medicine.inventory} {medicine.dosageUnit}(s)
+                  {currentMed.inventory} {currentMed.dosageUnit}(s)
                 </Text>
               </View>
 
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Refill Alert Level:</Text>
                 <Text style={styles.rowValue}>
-                  {medicine.refillThreshold !== undefined && medicine.refillThreshold !== null
-                    ? `${medicine.refillThreshold} ${medicine.dosageUnit}(s)`
+                  {currentMed.refillThreshold !== undefined && currentMed.refillThreshold !== null
+                    ? `${currentMed.refillThreshold} ${currentMed.dosageUnit}(s)`
                     : "Not configured"}
                 </Text>
               </View>
@@ -298,8 +354,8 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
               {isLowInventory && (
                 <View style={styles.lowStockWarning}>
                   <Text style={styles.lowStockWarningText}>
-                    ⚠️ Low Supply Warning: Current count ({medicine.inventory}) is at or below
-                    your refill threshold ({medicine.refillThreshold}). Please order a refill soon.
+                    ⚠️ Low Supply Warning: Current count ({currentMed.inventory}) is at or below
+                    your refill threshold ({currentMed.refillThreshold}). Please order a refill soon.
                   </Text>
                 </View>
               )}
@@ -308,6 +364,67 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
             <Text style={styles.noSupplyText}>
               Supply tracking is not enabled for this medicine. You can edit this medicine to track inventory.
             </Text>
+          )}
+        </Card>
+
+        {/* Recent Dose History Card (Phase 7) */}
+        <Card style={styles.card}>
+          <View style={styles.schedulesHeaderRow}>
+            <Text style={styles.sectionTitle}>Recent Dose History</Text>
+            {isLoadingActivities && (
+              <Text style={styles.loadingSchedulesText}>Updating...</Text>
+            )}
+          </View>
+          {activities.length === 0 ? (
+            <Text style={styles.noActivitiesText}>
+              No dose logs recorded yet for this medicine.
+            </Text>
+          ) : (
+            <View style={styles.activitiesList}>
+              {activities.slice(0, 5).map((act) => {
+                const actionBadgeColor =
+                  act.action === "Taken"
+                    ? colors.taken
+                    : act.action === "Skipped"
+                    ? colors.skipped
+                    : colors.snoozed;
+                return (
+                  <View key={act.id} style={styles.activityItem}>
+                    <View style={styles.activityHeaderRow}>
+                      <View
+                        style={[
+                          styles.actionBadge,
+                          { backgroundColor: actionBadgeColor },
+                        ]}
+                      >
+                        <Text style={styles.actionBadgeText}>{act.action}</Text>
+                      </View>
+                      <Text style={styles.activityTimeText}>
+                        {new Date(act.actionTime).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {" • "}
+                        {new Date(act.actionTime).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </Text>
+                    </View>
+                    {act.skipReason ? (
+                      <Text style={styles.activitySkipReason}>
+                        Reason: {act.skipReason}
+                      </Text>
+                    ) : null}
+                    {act.wasSnoozed ? (
+                      <Text style={styles.activitySnoozeNote}>
+                        ⏰ Previously snoozed {act.snoozeCount || 1} time(s)
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
           )}
         </Card>
 
@@ -405,7 +522,8 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
+    paddingTop: (StatusBar.currentHeight || 0) + spacing.xs,
+    paddingBottom: spacing.sm,
     paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
@@ -634,6 +752,61 @@ const styles = StyleSheet.create({
   },
   schedulesList: {
     marginTop: spacing.xs,
+  },
+  doseActionSubtitle: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  noActivitiesText: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontStyle: "italic",
+    paddingVertical: spacing.sm,
+  },
+  activitiesList: {
+    marginTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  activityItem: {
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary,
+  },
+  activityHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  actionBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  actionBadgeText: {
+    ...typography.caption,
+    fontWeight: "700",
+    color: colors.textInverse,
+  },
+  activityTimeText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: "500",
+  },
+  activitySkipReason: {
+    ...typography.caption,
+    color: colors.skipped,
+    fontStyle: "italic",
+    marginTop: 2,
+  },
+  activitySnoozeNote: {
+    ...typography.caption,
+    color: colors.snoozed,
+    fontWeight: "600",
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,

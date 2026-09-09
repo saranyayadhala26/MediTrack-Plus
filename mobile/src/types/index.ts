@@ -105,11 +105,16 @@ export interface MedicationActivity {
   userId: string;
   medicineId: string;
   scheduleId: string;
+  medicineName?: string;
+  dosage?: string;
+  dosageUnit?: string;
   scheduledDate: string; // YYYY-MM-DD
   scheduledTime: string; // HH:mm
   action: MedicationActionType;
   actionTime: string; // ISO DateTime
   skipReason?: string;
+  wasSnoozed?: boolean;
+  snoozeCount?: number;
   createdAt: string;
 }
 
@@ -140,9 +145,13 @@ export interface NotificationItem {
 }
 
 export interface AdherenceSummary {
+  startDate?: string;
+  endDate?: string;
   totalScheduled: number;
   takenCount: number;
   skippedCount: number;
-  missedCount: number;
+  snoozedCount: number;
+  pendingCount: number;
   adherencePercentage: number;
+  formula?: string;
 }

@@ -68,3 +68,8 @@ Thumbs.db
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Test screenshots
+emulator_*.png
+screen.png
+

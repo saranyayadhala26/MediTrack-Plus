@@ -382,6 +382,44 @@ class NotificationService {
   }
 
   /**
+   * Schedule a hardware local snooze reminder for a medication dose in N minutes (default 10m).
+   * Generates a non-repeating alert on the high-importance medication channel.
+   */
+  async scheduleSnoozeReminder(
+    medicineName: string,
+    dosageInfo: string,
+    scheduleId: string,
+    medicineId: string,
+    snoozeMinutes: number = 10
+  ): Promise<string> {
+    await this.initialize();
+    const identifier = `meditrack-snooze-${scheduleId}-${Date.now()}`;
+    return await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: {
+        title: `⏰ Snoozed Dose: ${medicineName}`,
+        body: `It is time to take your snoozed dose of ${medicineName}${dosageInfo ? ` (${dosageInfo})` : ""}.`,
+        sound: "default",
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        data: {
+          scheduleId,
+          medicineId,
+          medicineName,
+          dosage: dosageInfo,
+          isSnooze: true,
+          scheduledTime: new Date(Date.now() + snoozeMinutes * 60 * 1000).toISOString(),
+        },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: snoozeMinutes * 60,
+        repeats: false,
+        channelId: MEDICATION_CHANNEL_ID,
+      },
+    });
+  }
+
+  /**
    * Get the current count of active scheduled local notifications.
    */
   async getScheduledRemindersCount(): Promise<number> {

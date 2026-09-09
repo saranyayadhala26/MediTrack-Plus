@@ -108,8 +108,11 @@ def create_activity_document(
     action: str,
     action_time: Optional[datetime] = None,
     skip_reason: Optional[str] = None,
+    was_snoozed: bool = False,
+    snooze_count: int = 0,
 ) -> Dict[str, Any]:
     """Factory creating a new persistent MedicationActivity document."""
+    is_snoozed = action == "Snoozed"
     return {
         "_id": ObjectId(),
         "userId": user_id,
@@ -120,6 +123,8 @@ def create_activity_document(
         "action": action,
         "actionTime": action_time or now_utc(),
         "skipReason": skip_reason.strip() if skip_reason else None,
+        "wasSnoozed": was_snoozed or is_snoozed,
+        "snoozeCount": snooze_count + (1 if is_snoozed else 0),
         "createdAt": now_utc(),
     }
 

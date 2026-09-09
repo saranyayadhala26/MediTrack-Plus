@@ -73,6 +73,8 @@ class ActivityResponse(BaseModel):
     action: ActionType
     actionTime: datetime
     skipReason: Optional[str] = None
+    wasSnoozed: bool = False
+    snoozeCount: int = 0
     createdAt: datetime
 
     model_config = {
