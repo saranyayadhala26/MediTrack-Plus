@@ -155,3 +155,60 @@ export interface AdherenceSummary {
   adherencePercentage: number;
   formula?: string;
 }
+
+export type CalendarStatus = "Pending" | "Taken" | "Skipped" | "Snoozed";
+export type DayAggregateStatus = "Adherent" | "Skipped" | "Snoozed" | "Pending" | "None";
+
+export interface CalendarOccurrence {
+  date: string;
+  scheduledTime: string;
+  medicineId: string;
+  medicineName: string;
+  dosage: string;
+  dosageUnit: string;
+  scheduleId: string;
+  frequencyType: string;
+  status: CalendarStatus;
+  activityId?: string | null;
+  actionTime?: string | null;
+  skipReason?: string | null;
+  wasSnoozed: boolean;
+  snoozeCount: number;
+}
+
+export interface DaySummary {
+  date: string;
+  status: DayAggregateStatus;
+  totalDoses: number;
+  takenCount: number;
+  skippedCount: number;
+  snoozedCount: number;
+  pendingCount: number;
+}
+
+export interface CalendarResponse {
+  medical_disclaimer?: string;
+  startDate: string;
+  endDate: string;
+  clientDate?: string;
+  occurrences: CalendarOccurrence[];
+  days?: DaySummary[];
+  daysSummary?: DaySummary[];
+  totalOccurrences: number;
+  takenCount: number;
+  skippedCount: number;
+  snoozedCount: number;
+  pendingCount: number;
+}
+
+export interface StreakData {
+  medical_disclaimer?: string;
+  currentStreak: number;
+  longestStreak: number;
+  totalAdherentDays: number;
+  totalTrackedDays: number;
+  adherenceRule?: string;
+  lastAdherentDate?: string | null;
+  evaluatedDate: string;
+}
+

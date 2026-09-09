@@ -23,10 +23,11 @@ import { MedicineListScreen } from "../screens/medicines/MedicineListScreen";
 import { AddScheduleScreen } from "../screens/schedules/AddScheduleScreen";
 import { EditScheduleScreen } from "../screens/schedules/EditScheduleScreen";
 import { ActivityHistoryScreen } from "../screens/activities/ActivityHistoryScreen";
+import { CalendarScreen } from "../screens/calendar/CalendarScreen";
 import { notificationService } from "../services/notificationService";
 import { MedicationSchedule, Medicine } from "../types";
 
-type MainTab = "dashboard" | "medicines" | "history";
+type MainTab = "dashboard" | "calendar" | "medicines" | "history";
 type MedicineScreenMode =
   | "list"
   | "detail"
@@ -97,6 +98,10 @@ export const MainAppNavigator: React.FC = () => {
   const renderContent = () => {
     if (activeTab === "dashboard") {
       return <HomeScreen onNavigateToMedicines={handleNavigateToMedicines} />;
+    }
+
+    if (activeTab === "calendar") {
+      return <CalendarScreen />;
     }
 
     if (activeTab === "history") {
@@ -220,6 +225,7 @@ export const MainAppNavigator: React.FC = () => {
   // Hide bottom tab bar while user is actively filling out Add or Edit forms
   const showTabBar =
     activeTab === "dashboard" ||
+    activeTab === "calendar" ||
     activeTab === "history" ||
     (activeTab === "medicines" && (medicineMode === "list" || medicineMode === "detail"));
 
@@ -251,6 +257,31 @@ export const MainAppNavigator: React.FC = () => {
               ]}
             >
               Dashboard
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === "calendar" && styles.tabButtonActive]}
+            onPress={() => setActiveTab("calendar")}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === "calendar" }}
+            accessibilityLabel="Medication Calendar Tab"
+          >
+            <Text
+              style={[
+                styles.tabIcon,
+                activeTab === "calendar" ? styles.tabIconActive : styles.tabIconInactive,
+              ]}
+            >
+              📅
+            </Text>
+            <Text
+              style={[
+                styles.tabLabel,
+                activeTab === "calendar" ? styles.tabLabelActive : styles.tabLabelInactive,
+              ]}
+            >
+              Calendar
             </Text>
           </TouchableOpacity>
 

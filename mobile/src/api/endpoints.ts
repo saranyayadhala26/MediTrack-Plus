@@ -40,6 +40,12 @@ export const ENDPOINTS = {
     STREAKS: "/streaks",
   },
 
+  // Medication Calendar & Streaks (Phase 8)
+  CALENDAR: {
+    BASE: "/medication-calendar",
+    STREAKS: "/medication-calendar/streaks",
+  },
+
   // Caregivers
   CAREGIVERS: {
     BASE: "/caregivers",
