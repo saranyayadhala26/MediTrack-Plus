@@ -11,7 +11,7 @@ import { colors } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { LoginScreen } from "../screens/auth/LoginScreen";
 import { RegisterScreen } from "../screens/auth/RegisterScreen";
-import { HomeScreen } from "../screens/main/HomeScreen";
+import { MainAppNavigator } from "./MainAppNavigator";
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -37,7 +37,7 @@ export const RootNavigator: React.FC = () => {
     );
   }
 
-  return <HomeScreen />;
+  return <MainAppNavigator />;
 };
 
 const styles = StyleSheet.create({

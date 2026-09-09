@@ -33,6 +33,30 @@ export interface Medicine {
   updatedAt: string;
 }
 
+export interface MedicineCreatePayload {
+  name: string;
+  dosage: string;
+  dosageUnit: DosageUnit;
+  frequency: string;
+  instructions?: string;
+  startDate?: string;
+  endDate?: string;
+  inventory?: number;
+  refillThreshold?: number;
+}
+
+export interface MedicineUpdatePayload {
+  name?: string;
+  dosage?: string;
+  dosageUnit?: DosageUnit;
+  frequency?: string;
+  instructions?: string;
+  startDate?: string;
+  endDate?: string;
+  inventory?: number;
+  refillThreshold?: number;
+}
+
 export type ScheduleFrequency = "daily" | "weekly" | "custom";
 
 export interface MedicationSchedule {

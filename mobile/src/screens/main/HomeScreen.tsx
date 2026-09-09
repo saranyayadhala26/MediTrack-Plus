@@ -17,7 +17,11 @@ import { config } from "../../constants/config";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 
-export const HomeScreen: React.FC = () => {
+interface HomeScreenProps {
+  onNavigateToMedicines?: (subScreen?: "list" | "add") => void;
+}
+
+export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToMedicines }) => {
   const { user, logout, refreshProfile } = useAuth();
 
   const isCaregiver = user?.role === "caregiver";
@@ -58,6 +62,33 @@ export const HomeScreen: React.FC = () => {
           <Text style={styles.disclaimerText}>{config.medicalDisclaimer}</Text>
         </View>
 
+        {/* Prescription Management Card */}
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>My Prescriptions</Text>
+          <Text style={styles.cardDescription}>
+            {isCaregiver
+              ? "View medication adherence logs for your linked patient (read-only)."
+              : "Keep track of your prescribed medications, dosage schedules, and supply refill levels."}
+          </Text>
+
+          <View style={styles.actionRow}>
+            <Button
+              title="View Medicines"
+              onPress={() => onNavigateToMedicines?.("list")}
+              variant="primary"
+              style={styles.medicineActionButton}
+            />
+            {!isCaregiver && (
+              <Button
+                title="+ Add Medicine"
+                onPress={() => onNavigateToMedicines?.("add")}
+                variant="outline"
+                style={styles.medicineActionButton}
+              />
+            )}
+          </View>
+        </Card>
+
         {/* Account Profile Card */}
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Account Profile</Text>
@@ -88,16 +119,17 @@ export const HomeScreen: React.FC = () => {
           />
         </Card>
 
-        {/* Next Phases Ready Card */}
+        {/* Phase Status Card */}
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Phase 3 Authentication Active</Text>
+          <Text style={styles.cardTitle}>Phase 4 Medicine Management Active</Text>
           <Text style={styles.cardDescription}>
-            Your session is secured via hardware-backed SecureStore and signed JWT tokens.
+            Full CRUD operations, patient isolation, and supply tracking are verified and active.
           </Text>
           <View style={styles.bulletList}>
-            <Text style={styles.bulletItem}>✓ Bcrypt password hashing verified</Text>
-            <Text style={styles.bulletItem}>✓ Role-based permissions enforced</Text>
-            <Text style={styles.bulletItem}>✓ Ready for Phase 4: Medicine Management</Text>
+            <Text style={styles.bulletItem}>✓ Full Medicine CRUD operational</Text>
+            <Text style={styles.bulletItem}>✓ Strict patient data isolation enforced</Text>
+            <Text style={styles.bulletItem}>✓ Low supply & refill threshold alerts active</Text>
+            <Text style={styles.bulletItem}>✓ Medical safety disclaimers embedded</Text>
           </View>
         </Card>
 
@@ -227,6 +259,14 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     marginTop: spacing.md,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.sm,
+  },
+  medicineActionButton: {
+    flex: 1,
   },
   logoutButton: {
     marginVertical: spacing.lg,

@@ -37,6 +37,22 @@ class MedicineBase(BaseModel):
             raise ValueError("Medicine name cannot be empty or whitespace.")
         return stripped
 
+    @field_validator("dosage")
+    @classmethod
+    def strip_dosage(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Dosage cannot be empty or whitespace.")
+        return stripped
+
+    @field_validator("frequency")
+    @classmethod
+    def strip_frequency(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Frequency cannot be empty or whitespace.")
+        return stripped
+
     @model_validator(mode="after")
     def validate_date_range(self) -> "MedicineBase":
         if self.startDate and self.endDate:
@@ -60,6 +76,36 @@ class MedicineUpdate(BaseModel):
     inventory: Optional[int] = Field(None, ge=0)
     refillThreshold: Optional[int] = Field(None, ge=0)
 
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("Medicine name cannot be empty or whitespace.")
+            return stripped
+        return v
+
+    @field_validator("dosage")
+    @classmethod
+    def strip_dosage(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("Dosage cannot be empty or whitespace.")
+            return stripped
+        return v
+
+    @field_validator("frequency")
+    @classmethod
+    def strip_frequency(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("Frequency cannot be empty or whitespace.")
+            return stripped
+        return v
+
     @model_validator(mode="after")
     def validate_date_range(self) -> "MedicineUpdate":
         if self.startDate and self.endDate:
@@ -82,3 +128,8 @@ class MedicineResponse(MedicineBase, MedicalDisclaimerMixin):
 class MedicineListResponse(MedicalDisclaimerMixin):
     items: List[MedicineResponse] = Field(default_factory=list)
     total: int = 0
+
+
+class MedicineDeleteResponse(MedicalDisclaimerMixin):
+    message: str = Field(default="Medicine deleted successfully")
+    id: str
