@@ -1,10 +1,10 @@
 /**
- * Configured Axios HTTP Client with Authorization Interceptors
+ * Configured Axios HTTP Client with Hardware-Backed Secure Authorization Interceptors
  */
 
 import axios from "axios";
 import { config } from "../constants/config";
-import { storage } from "../storage/asyncStorage";
+import { secureStorage } from "../storage/secureStorage";
 
 export const apiClient = axios.create({
   baseURL: config.apiBaseUrl,
@@ -15,10 +15,10 @@ export const apiClient = axios.create({
   },
 });
 
-// Request interceptor: attach bearer token
+// Request interceptor: attach bearer token securely retrieved from hardware Keystore
 apiClient.interceptors.request.use(
   async (requestConfig) => {
-    const token = await storage.getToken();
+    const token = await secureStorage.getToken();
     if (token && requestConfig.headers) {
       requestConfig.headers.Authorization = `Bearer ${token}`;
     }
@@ -29,13 +29,13 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor: catch 401 unauthorized
+// Response interceptor: catch 401 unauthorized & wipe secure session
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response && error.response.status === 401) {
-      // Token is invalid or expired
-      await storage.clearSession();
+      // Token is invalid or expired - clear secure session
+      await secureStorage.clearAuthSession();
     }
     return Promise.reject(error);
   }

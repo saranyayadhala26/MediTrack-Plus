@@ -1,9 +1,11 @@
-"""MongoDB Atlas connection manager and collection references."""
+"""MongoDB Atlas connection manager and collection references using PyMongo Async API."""
 
 import logging
 from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import pymongo
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
+from pymongo.asynchronous.collection import AsyncCollection
 
 from app.core.config import settings
 from app.models.collections import (
@@ -19,24 +21,24 @@ logger = logging.getLogger("meditrack.db")
 
 
 class MongoDB:
-    client: Optional[AsyncIOMotorClient] = None
-    db: Optional[AsyncIOMotorDatabase] = None
+    client: Optional[AsyncMongoClient] = None
+    db: Optional[AsyncDatabase] = None
 
 
 db_manager = MongoDB()
 
 
 async def connect_to_mongo():
-    """Initialize MongoDB connection and ensure database indexes."""
-    logger.info("Connecting to MongoDB at: %s", settings.MONGODB_URI.split("@")[-1])
+    """Initialize MongoDB Atlas connection using official PyMongo Async client and ensure indexes."""
+    logger.info("Connecting to MongoDB Atlas at: %s", settings.MONGODB_URI.split("@")[-1])
     try:
-        db_manager.client = AsyncIOMotorClient(
+        db_manager.client = AsyncMongoClient(
             settings.MONGODB_URI,
             serverSelectionTimeoutMS=5000
         )
         db_manager.db = db_manager.client[settings.DATABASE_NAME]
 
-        # Verify connection
+        # Verify Atlas connection with ping
         await db_manager.client.admin.command("ping")
         logger.info("Successfully connected to MongoDB Atlas database '%s'", settings.DATABASE_NAME)
 
@@ -50,14 +52,15 @@ async def connect_to_mongo():
 
 
 async def close_mongo_connection():
-    """Close MongoDB connection pool."""
+    """Close MongoDB Atlas async connection pool."""
     if db_manager.client:
         logger.info("Closing MongoDB connection pool...")
-        db_manager.client.close()
+        await db_manager.client.close()
         logger.info("MongoDB connection closed.")
 
+
 async def setup_indexes():
-    """Configure required indexes across all collections."""
+    """Configure required indexes across all collections using PyMongo Async API."""
     if db_manager.db is None:
         return
 
@@ -111,12 +114,12 @@ async def setup_indexes():
         ])
         await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([("createdAt", pymongo.DESCENDING)])
 
-        logger.info("MongoDB indexes verified successfully.")
+        logger.info("MongoDB indexes verified successfully with PyMongo Async API.")
     except Exception as e:
         logger.warning("Error creating MongoDB indexes: %s", str(e))
 
 
-def get_database() -> AsyncIOMotorDatabase:
+def get_database() -> AsyncDatabase:
     """Return current active database reference."""
     if db_manager.db is None:
         raise RuntimeError("Database connection has not been initialized.")
@@ -124,25 +127,25 @@ def get_database() -> AsyncIOMotorDatabase:
 
 
 # Collection accessors
-def get_users_collection():
+def get_users_collection() -> AsyncCollection:
     return get_database()[COLLECTION_USERS]
 
 
-def get_medicines_collection():
+def get_medicines_collection() -> AsyncCollection:
     return get_database()[COLLECTION_MEDICINES]
 
 
-def get_schedules_collection():
+def get_schedules_collection() -> AsyncCollection:
     return get_database()[COLLECTION_SCHEDULES]
 
 
-def get_activities_collection():
+def get_activities_collection() -> AsyncCollection:
     return get_database()[COLLECTION_ACTIVITIES]
 
 
-def get_caregivers_collection():
+def get_caregivers_collection() -> AsyncCollection:
     return get_database()[COLLECTION_CAREGIVERS]
 
 
-def get_notifications_collection():
+def get_notifications_collection() -> AsyncCollection:
     return get_database()[COLLECTION_NOTIFICATIONS]

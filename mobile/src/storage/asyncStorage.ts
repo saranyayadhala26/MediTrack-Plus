@@ -1,60 +1,49 @@
 /**
- * Safe local storage utility for persistent session handling.
+ * Non-Sensitive Local Storage Utility using AsyncStorage.
+ * Used exclusively for non-sensitive user preferences and application UI state.
+ * For JWT tokens and credentials, use secureStorage.ts (expo-secure-store).
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { config } from "../constants/config";
-import { User } from "../types";
 
-export const storage = {
-  async saveToken(token: string): Promise<void> {
+const PREFERENCE_KEYS = {
+  THEME_MODE: "@meditrack_theme_mode",
+  NOTIFICATIONS_MUTED: "@meditrack_notifications_muted",
+  LAST_ACTIVE_TAB: "@meditrack_last_active_tab",
+};
+
+export const preferenceStorage = {
+  async setPreference(key: string, value: string): Promise<void> {
     try {
-      await AsyncStorage.setItem(config.tokenStorageKey, token);
+      await AsyncStorage.setItem(key, value);
     } catch (e) {
-      console.error("Failed to save auth token", e);
+      console.error("Failed to save preference:", key, e);
     }
   },
 
-  async getToken(): Promise<string | null> {
+  async getPreference(key: string): Promise<string | null> {
     try {
-      return await AsyncStorage.getItem(config.tokenStorageKey);
+      return await AsyncStorage.getItem(key);
     } catch (e) {
-      console.error("Failed to retrieve auth token", e);
+      console.error("Failed to retrieve preference:", key, e);
       return null;
     }
   },
 
-  async removeToken(): Promise<void> {
+  async removePreference(key: string): Promise<void> {
     try {
-      await AsyncStorage.removeItem(config.tokenStorageKey);
+      await AsyncStorage.removeItem(key);
     } catch (e) {
-      console.error("Failed to remove auth token", e);
+      console.error("Failed to remove preference:", key, e);
     }
   },
 
-  async saveUser(user: User): Promise<void> {
+  async clearAllPreferences(): Promise<void> {
     try {
-      await AsyncStorage.setItem(config.userStorageKey, JSON.stringify(user));
+      const keys = Object.values(PREFERENCE_KEYS);
+      await AsyncStorage.multiRemove(keys);
     } catch (e) {
-      console.error("Failed to save user session", e);
-    }
-  },
-
-  async getUser(): Promise<User | null> {
-    try {
-      const data = await AsyncStorage.getItem(config.userStorageKey);
-      return data ? JSON.parse(data) : null;
-    } catch (e) {
-      console.error("Failed to retrieve user session", e);
-      return null;
-    }
-  },
-
-  async clearSession(): Promise<void> {
-    try {
-      await AsyncStorage.multiRemove([config.tokenStorageKey, config.userStorageKey]);
-    } catch (e) {
-      console.error("Failed to clear session", e);
+      console.error("Failed to clear preferences:", e);
     }
   },
 };
