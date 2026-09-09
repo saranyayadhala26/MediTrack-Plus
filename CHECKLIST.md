@@ -12,11 +12,11 @@
   - [x] Root `README.md` and `CHECKLIST.md`
   - [x] Verification of backend health checks & mobile structure
 
-- [ ] **Phase 2: Backend Core & MongoDB Models**
-  - [ ] MongoDB collection definitions (`users`, `medicines`, `medication_schedules`, `medication_activities`, `caregivers`, `notifications`)
-  - [ ] Pydantic domain models and validation rules
-  - [ ] Database helper utilities and ObjectId serializers
-  - [ ] Medical safety disclaimers embedded in schemas
+- [x] **Phase 2: Backend Core & MongoDB Models**
+  - [x] MongoDB collection definitions (`users`, `medicines`, `medication_schedules`, `medication_activities`, `caregivers`, `notifications`)
+  - [x] Pydantic domain models and validation rules
+  - [x] Database helper utilities and ObjectId serializers
+  - [x] Medical safety disclaimers embedded in schemas
 
 - [ ] **Phase 3: Authentication & User Management**
   - [ ] UC-01: User registration with input validation (role: Patient / Caregiver)

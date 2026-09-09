@@ -6,6 +6,14 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import pymongo
 
 from app.core.config import settings
+from app.models.collections import (
+    COLLECTION_USERS,
+    COLLECTION_MEDICINES,
+    COLLECTION_SCHEDULES,
+    COLLECTION_ACTIVITIES,
+    COLLECTION_CAREGIVERS,
+    COLLECTION_NOTIFICATIONS,
+)
 
 logger = logging.getLogger("meditrack.db")
 
@@ -48,41 +56,60 @@ async def close_mongo_connection():
         db_manager.client.close()
         logger.info("MongoDB connection closed.")
 
-
 async def setup_indexes():
     """Configure required indexes across all collections."""
     if db_manager.db is None:
         return
 
     try:
-        # Users indexes
-        await db_manager.db.users.create_index([("email", pymongo.ASCENDING)], unique=True)
+        # Users indexes: unique email
+        await db_manager.db[COLLECTION_USERS].create_index(
+            [("email", pymongo.ASCENDING)],
+            unique=True
+        )
 
-        # Medicines indexes
-        await db_manager.db.medicines.create_index([("userId", pymongo.ASCENDING)])
-        await db_manager.db.medicines.create_index([("name", pymongo.ASCENDING)])
+        # Medicines indexes: query by userId, search by name, compound index
+        await db_manager.db[COLLECTION_MEDICINES].create_index([("userId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_MEDICINES].create_index([("name", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_MEDICINES].create_index([
+            ("userId", pymongo.ASCENDING),
+            ("name", pymongo.ASCENDING)
+        ])
 
-        # Medication Schedules indexes
-        await db_manager.db.medication_schedules.create_index([("userId", pymongo.ASCENDING)])
-        await db_manager.db.medication_schedules.create_index([("medicineId", pymongo.ASCENDING)])
+        # Medication Schedules indexes: user schedules, medicine schedules, active schedules
+        await db_manager.db[COLLECTION_SCHEDULES].create_index([("userId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_SCHEDULES].create_index([("medicineId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_SCHEDULES].create_index([
+            ("userId", pymongo.ASCENDING),
+            ("enabled", pymongo.ASCENDING)
+        ])
 
-        # Medication Activities indexes
-        await db_manager.db.medication_activities.create_index([("userId", pymongo.ASCENDING)])
-        await db_manager.db.medication_activities.create_index([("scheduledDate", pymongo.ASCENDING)])
-        await db_manager.db.medication_activities.create_index([("medicineId", pymongo.ASCENDING)])
-        await db_manager.db.medication_activities.create_index([
+        # Medication Activities indexes: date queries, streak lookups, history
+        await db_manager.db[COLLECTION_ACTIVITIES].create_index([("userId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_ACTIVITIES].create_index([("scheduledDate", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_ACTIVITIES].create_index([("medicineId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_ACTIVITIES].create_index([
             ("userId", pymongo.ASCENDING),
             ("scheduledDate", pymongo.ASCENDING),
             ("scheduleId", pymongo.ASCENDING)
         ])
 
-        # Caregivers indexes
-        await db_manager.db.caregivers.create_index([("patientId", pymongo.ASCENDING)])
-        await db_manager.db.caregivers.create_index([("caregiverEmail", pymongo.ASCENDING)])
+        # Caregivers indexes: patient's caregivers, unique relationship per email
+        await db_manager.db[COLLECTION_CAREGIVERS].create_index([("patientId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_CAREGIVERS].create_index([("caregiverEmail", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_CAREGIVERS].create_index(
+            [("patientId", pymongo.ASCENDING), ("caregiverEmail", pymongo.ASCENDING)],
+            unique=True
+        )
 
-        # Notifications indexes
-        await db_manager.db.notifications.create_index([("userId", pymongo.ASCENDING)])
-        await db_manager.db.notifications.create_index([("status", pymongo.ASCENDING)])
+        # Notifications indexes: user unread alerts, chronological order
+        await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([("userId", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([("status", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([
+            ("userId", pymongo.ASCENDING),
+            ("status", pymongo.ASCENDING)
+        ])
+        await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([("createdAt", pymongo.DESCENDING)])
 
         logger.info("MongoDB indexes verified successfully.")
     except Exception as e:
@@ -98,24 +125,24 @@ def get_database() -> AsyncIOMotorDatabase:
 
 # Collection accessors
 def get_users_collection():
-    return get_database()["users"]
+    return get_database()[COLLECTION_USERS]
 
 
 def get_medicines_collection():
-    return get_database()["medicines"]
+    return get_database()[COLLECTION_MEDICINES]
 
 
 def get_schedules_collection():
-    return get_database()["medication_schedules"]
+    return get_database()[COLLECTION_SCHEDULES]
 
 
 def get_activities_collection():
-    return get_database()["medication_activities"]
+    return get_database()[COLLECTION_ACTIVITIES]
 
 
 def get_caregivers_collection():
-    return get_database()["caregivers"]
+    return get_database()[COLLECTION_CAREGIVERS]
 
 
 def get_notifications_collection():
-    return get_database()["notifications"]
+    return get_database()[COLLECTION_NOTIFICATIONS]
