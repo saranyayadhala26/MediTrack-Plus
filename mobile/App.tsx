@@ -68,7 +68,7 @@ export default function App() {
             Clean three-layer architecture initialized:
           </Text>
           <View style={styles.bulletList}>
-            <Text style={styles.bulletItem}>✓ Mobile App: React Native + Expo SDK 52 (TypeScript)</Text>
+            <Text style={styles.bulletItem}>✓ Mobile App: React Native + Expo SDK 57 (TypeScript)</Text>
             <Text style={styles.bulletItem}>✓ REST API: FastAPI + Pydantic v2 (Python 3.13)</Text>
             <Text style={styles.bulletItem}>✓ Database: MongoDB Atlas Async Client (PyMongo Async)</Text>
             <Text style={styles.bulletItem}>✓ Security: Hardware-Backed SecureStore & PyJWT</Text>

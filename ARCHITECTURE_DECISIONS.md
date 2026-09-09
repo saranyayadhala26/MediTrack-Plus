@@ -4,10 +4,10 @@ This document outlines the architectural decisions, design rationale, and techno
 
 ---
 
-## 1. Frontend Mobile Framework: React Native with Expo SDK 52
+## 1. Frontend Mobile Framework: React Native with Expo SDK 57
 
 ### Decision
-Adopt **React Native** managed through **Expo** (current stable SDK 52) with native component compilation.
+Adopt **React Native 0.86** managed through **Expo** (current stable SDK 57) with React 19 and native component compilation.
 
 ### Rationale
 - **Cross-Platform & Android Performance**: Delivers native 60fps Android UI performance with native thread scheduling rather than webview emulation.
