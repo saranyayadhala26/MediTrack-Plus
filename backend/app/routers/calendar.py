@@ -44,23 +44,22 @@ from app.utils.mongo import is_valid_object_id, to_object_id
 logger = logging.getLogger("meditrack.calendar")
 router = APIRouter(tags=["Medication Calendar & Streaks"])
 
-DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+from app.services.occurrence_engine import (
+    DATE_REGEX,
+    date_to_schema_day,
+    get_occurrence_dates_for_schedule,
+    get_reference_today,
+    is_schedule_occurrence,
+    parse_date,
+    python_weekday_to_schema_day,
+    schema_day_to_python_weekday,
+)
 
-
-def _parse_date(date_str: str, param_name: str) -> date:
-    """Validate and parse a YYYY-MM-DD date string."""
-    if not DATE_REGEX.match(date_str.strip()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"{param_name} must be in YYYY-MM-DD format.",
-        )
-    try:
-        return date.fromisoformat(date_str.strip())
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"{param_name} contains an invalid calendar date: '{date_str}'.",
-        )
+# Backward-compatible aliases
+_DATE_REGEX = DATE_REGEX
+_parse_date = parse_date
+_get_reference_today = get_reference_today
+_is_schedule_occurrence = is_schedule_occurrence
 
 
 async def _resolve_target_patient(
@@ -135,60 +134,6 @@ async def _resolve_target_patient(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Access forbidden: Invalid user role.",
     )
-
-
-def _get_reference_today(client_date_param: Optional[str]) -> date:
-    """
-    Establish consistent timezone reference date for 'today'.
-    Defaults to UTC today if clientDate is not supplied.
-    """
-    if client_date_param:
-        return _parse_date(client_date_param, "clientDate")
-    return datetime.now(timezone.utc).date()
-
-
-def _is_schedule_occurrence(
-    sched: Dict[str, Any],
-    med: Dict[str, Any],
-    curr_date: date,
-    curr_str: str,
-) -> bool:
-    """Check if a schedule generates an occurrence on a specific date."""
-    # 1. Schedule must be active
-    if not sched.get("enabled", True):
-        return False
-
-    # 2. Medicine course boundaries
-    med_start = med.get("startDate")
-    med_end = med.get("endDate")
-    if med_start and curr_str < med_start:
-        return False
-    if med_end and curr_str > med_end:
-        return False
-
-    # 3. Schedule duration boundaries
-    s_start = sched.get("startDate")
-    s_end = sched.get("endDate")
-    if s_start and curr_str < s_start:
-        return False
-    if s_end and curr_str > s_end:
-        return False
-
-    # 4. Frequency type evaluation
-    freq = sched.get("frequencyType", "daily")
-    if freq == "daily":
-        return True
-
-    if freq == "weekly":
-        # Schema definition: 0=Sunday, 1=Monday ... 6=Saturday
-        weekday = curr_date.weekday()  # Python: 0=Mon ... 6=Sun
-        schema_day = (weekday + 1) % 7
-        return schema_day in (sched.get("daysOfWeek") or [])
-
-    if freq == "custom":
-        return curr_str in (sched.get("dates") or [])
-
-    return False
 
 
 @router.get(
