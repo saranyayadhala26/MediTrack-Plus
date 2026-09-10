@@ -24,6 +24,11 @@ from app.services.missed_dose_rules import (
     RuleQualificationType,
     evaluate_occurrence_sequence,
 )
+from app.services.caregiver_alert_service import (
+    AlertPersistenceResult,
+    CaregiverAlertService,
+    build_fingerprint,
+)
 
 __all__ = [
     "DATE_REGEX",
@@ -44,4 +49,8 @@ __all__ = [
     "PatientRuleEvaluationSummary",
     "RuleQualificationType",
     "evaluate_occurrence_sequence",
+    "AlertPersistenceResult",
+    "CaregiverAlertService",
+    "build_fingerprint",
 ]
+

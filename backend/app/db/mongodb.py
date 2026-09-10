@@ -116,6 +116,15 @@ async def setup_indexes():
             ("status", pymongo.ASCENDING)
         ])
         await db_manager.db[COLLECTION_NOTIFICATIONS].create_index([("createdAt", pymongo.DESCENDING)])
+        # Caregiver alert deduplication: compound unique index on (caregiverId, fingerprint)
+        await db_manager.db[COLLECTION_NOTIFICATIONS].create_index(
+            [
+                ("caregiverId", pymongo.ASCENDING),
+                ("fingerprint", pymongo.ASCENDING),
+            ],
+            unique=True,
+            partialFilterExpression={"fingerprint": {"$type": "string"}},
+        )
 
         logger.info("MongoDB indexes verified successfully with PyMongo Async API.")
     except Exception as e:

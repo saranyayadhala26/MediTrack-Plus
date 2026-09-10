@@ -161,9 +161,13 @@ def create_notification_document(
     schedule_id: Optional[ObjectId] = None,
     scheduled_time: Optional[datetime] = None,
     status: str = "unread",
+    patient_id: Optional[ObjectId] = None,
+    alert_type: Optional[str] = None,
+    fingerprint: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Factory creating a new persistent Notification document."""
-    return {
+    doc: Dict[str, Any] = {
         "_id": ObjectId(),
         "userId": user_id,
         "caregiverId": caregiver_id,
@@ -177,3 +181,13 @@ def create_notification_document(
         "createdAt": now_utc(),
         "updatedAt": now_utc(),
     }
+    if patient_id is not None:
+        doc["patientId"] = patient_id
+    if alert_type is not None:
+        doc["alertType"] = alert_type
+    if fingerprint is not None:
+        doc["fingerprint"] = fingerprint
+    if metadata is not None:
+        doc["metadata"] = metadata
+    return doc
+

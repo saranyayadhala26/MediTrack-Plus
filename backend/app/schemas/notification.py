@@ -8,7 +8,7 @@ Provides models for medication reminders and notification alerts:
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from app.schemas.common import MedicalDisclaimerMixin
 
@@ -44,6 +44,10 @@ class NotificationResponse(NotificationBase, MedicalDisclaimerMixin):
     caregiverId: Optional[str] = None
     medicineId: Optional[str] = None
     scheduleId: Optional[str] = None
+    patientId: Optional[str] = None
+    alertType: Optional[str] = None
+    fingerprint: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
     status: NotificationStatus = NotificationStatus.UNREAD
     createdAt: datetime
     updatedAt: datetime
