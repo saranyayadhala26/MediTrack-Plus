@@ -173,6 +173,16 @@ async def get_medication_calendar(
             detail="startDate cannot be after endDate.",
         )
 
+    return await build_calendar_response(patient_oid, start_d, end_d, today)
+
+
+async def build_calendar_response(
+    patient_oid: ObjectId,
+    start_d: date,
+    end_d: date,
+    today: date,
+) -> CalendarResponse:
+    """Core reusable calculation of medication calendar for a patient across a date range."""
     # 1. Fetch patient's medicines
     medicines_coll = get_medicines_collection()
     medicines = await medicines_coll.find({"userId": patient_oid}).to_list(length=1000)
@@ -351,6 +361,14 @@ async def get_adherence_streaks(
     """
     patient_oid = await _resolve_target_patient(current_user, patientId)
     today = _get_reference_today(clientDate)
+    return await build_streak_response(patient_oid, today)
+
+
+async def build_streak_response(
+    patient_oid: ObjectId,
+    today: date,
+) -> StreakResponse:
+    """Core reusable calculation of medication adherence streaks for a patient."""
     today_str = today.isoformat()
 
     # 1. Fetch medicines

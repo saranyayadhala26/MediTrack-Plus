@@ -5,6 +5,8 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.common import MedicalDisclaimerMixin
+
 
 class CaregiverStatus(str, Enum):
     ACTIVE = "active"
@@ -56,7 +58,21 @@ class CaregiverAlert(BaseModel):
     timestamp: datetime
 
 
-class CaregiverMonitoringSummary(BaseModel):
+class LinkedPatientResponse(BaseModel):
+    patientId: str = Field(..., description="Unique ID of the linked patient")
+    fullName: str = Field(..., description="Patient full name")
+    email: EmailStr = Field(..., description="Patient email address")
+    emergencyContact: Optional[str] = Field(None, description="Patient emergency contact phone number")
+    relationship: str = Field(..., description="Relationship to patient (e.g. Father, Daughter)")
+    status: str = Field(default="active", description="Relationship status")
+    linkedAt: datetime = Field(..., description="Timestamp when relationship was established")
+
+    model_config = {
+        "from_attributes": True,
+    }
+
+
+class CaregiverMonitoringSummary(MedicalDisclaimerMixin, BaseModel):
     patientId: str
     patientName: str
     adherencePercentage: float
@@ -66,3 +82,6 @@ class CaregiverMonitoringSummary(BaseModel):
     missedToday: int
     recentAlerts: List[CaregiverAlert] = Field(default_factory=list)
     permissionsNote: str = "Read-only access. Prescription and schedule modifications are strictly prohibited."
+    currentStreak: Optional[int] = Field(default=0, description="Current consecutive adherent days")
+    longestStreak: Optional[int] = Field(default=0, description="Longest historical streak")
+

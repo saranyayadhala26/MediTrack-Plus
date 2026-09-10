@@ -20,15 +20,31 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 import pymongo
 
-from app.core.dependencies import get_current_patient
-from app.db.mongodb import get_caregivers_collection, get_users_collection
+from app.core.dependencies import get_current_caregiver, get_current_patient
+from app.db.mongodb import (
+    get_caregivers_collection,
+    get_notifications_collection,
+    get_users_collection,
+)
 from app.models.collections import create_caregiver_document, now_utc
 from app.schemas.caregiver import (
+    CaregiverAlert,
     CaregiverCreate,
+    CaregiverMonitoringSummary,
     CaregiverResponse,
     CaregiverStatus,
+    LinkedPatientResponse,
+)
+from app.schemas.notification import (
+    NotificationResponse,
+    NotificationStatus,
+    NotificationType,
 )
 from app.schemas.user import UserRole
+from app.services.caregiver_alert_service import CaregiverAlertService
+from app.services.missed_dose_service import MissedDoseService
+from app.services.occurrence_engine import get_reference_today, parse_date
+from app.routers.calendar import build_calendar_response, build_streak_response
 from app.utils.mongo import document_to_dict, is_valid_object_id, to_object_id
 
 logger = logging.getLogger("meditrack.caregivers")
@@ -247,3 +263,278 @@ async def revoke_caregiver(
         patient_oid,
     )
     return None
+
+
+# ==============================================================================
+# CAREGIVER MONITORING ENDPOINTS (Phase 9.2.5)
+# ==============================================================================
+
+@router.get(
+    "/patients",
+    response_model=List[LinkedPatientResponse],
+    summary="Retrieve active linked patients for the authenticated caregiver",
+)
+async def list_linked_patients(
+    current_user: Dict[str, Any] = Depends(get_current_caregiver),
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve list of patients linked to the authenticated caregiver.
+
+    Requirements:
+    1. Authenticate using caregiver JWT.
+    2. Query caregivers collection using caregiver email from JWT.
+    3. Return ONLY active caregiver relationships (revoked links excluded).
+    4. Fetch patient details (fullName, email, emergencyContact) from users collection.
+    5. Zero sensitive auth fields exposed.
+    6. Does not accept patientId query parameter.
+    """
+    cg_email = current_user.get("email", "").strip().lower()
+    caregivers_coll = get_caregivers_collection()
+    users_coll = get_users_collection()
+
+    cursor = caregivers_coll.find({
+        "caregiverEmail": cg_email,
+        "status": CaregiverStatus.ACTIVE.value,
+    }).sort("createdAt", pymongo.DESCENDING)
+
+    links = await cursor.to_list(length=100)
+    if not links:
+        return []
+
+    patients_list: List[Dict[str, Any]] = []
+    for link in links:
+        pt_oid = link.get("patientId")
+        if not pt_oid:
+            continue
+        patient_user = await users_coll.find_one({"_id": pt_oid})
+        if not patient_user:
+            continue
+
+        patients_list.append({
+            "patientId": str(pt_oid),
+            "fullName": patient_user.get("fullName", ""),
+            "email": patient_user.get("email", ""),
+            "emergencyContact": patient_user.get("emergencyContact"),
+            "relationship": link.get("relationship", ""),
+            "status": link.get("status", "active"),
+            "linkedAt": link.get("createdAt", now_utc()),
+        })
+
+    return patients_list
+
+
+@router.get(
+    "/patients/{patientId}/summary",
+    response_model=CaregiverMonitoringSummary,
+    summary="Retrieve adherence monitoring summary for a linked patient",
+)
+async def get_patient_monitoring_summary(
+    patientId: str,
+    clientDate: Optional[str] = Query(None, description="Client reference today (YYYY-MM-DD)"),
+    current_user: Dict[str, Any] = Depends(get_current_caregiver),
+) -> CaregiverMonitoringSummary:
+    """
+    Retrieve read-only adherence monitoring summary for a linked patient.
+
+    Requirements:
+    1. Authenticate caregiver via JWT.
+    2. Verify the caregiver has an ACTIVE relationship with the requested patient.
+    3. If no active relationship exists -> 403 Forbidden without leaking patient existence.
+    4. Safe 404 response for malformed patientId.
+    5. Reuses Phase 8 calendar and streak calculations (no duplicate formula).
+    6. Incorporates Phase 9.2.2 missed-dose evaluation for today.
+    7. Exposes recent alerts for this caregiver and patient.
+    8. Zero sensitive authentication fields.
+    """
+    if not is_valid_object_id(patientId):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient records not found.",
+        )
+
+    patient_oid = to_object_id(patientId)
+    cg_email = current_user.get("email", "").strip().lower()
+
+    caregivers_coll = get_caregivers_collection()
+    assignment = await caregivers_coll.find_one({
+        "caregiverEmail": cg_email,
+        "patientId": patient_oid,
+        "status": CaregiverStatus.ACTIVE.value,
+    })
+
+    if not assignment:
+        logger.warning(
+            "Caregiver %s denied monitoring summary for patient %s (no active assignment)",
+            cg_email,
+            patientId,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access forbidden: Active caregiver assignment required.",
+        )
+
+    users_coll = get_users_collection()
+    patient_user = await users_coll.find_one({"_id": patient_oid})
+    patient_name = patient_user.get("fullName", "Patient") if patient_user else "Patient"
+
+    today = get_reference_today(clientDate)
+
+    # 1. Reuse Phase 8 calendar logic for today
+    cal_today = await build_calendar_response(patient_oid, start_d=today, end_d=today, today=today)
+    total_scheduled = cal_today.totalOccurrences
+    taken_today = cal_today.takenCount
+    skipped_today = cal_today.skippedCount
+
+    # 2. Reuse Phase 8 streak logic
+    streak_res = await build_streak_response(patient_oid, today=today)
+
+    # 3. Classify today's missed occurrences via MissedDoseService
+    missed_service = MissedDoseService()
+    today_classified = await missed_service.get_classified_occurrences_for_date(patient_oid, today)
+    missed_today = sum(1 for o in today_classified if o.is_missed)
+
+    # 4. Compute adherence percentage
+    if total_scheduled > 0:
+        adherence_pct = round((taken_today / total_scheduled) * 100.0, 1)
+    elif streak_res.totalTrackedDays > 0:
+        adherence_pct = round((streak_res.totalAdherentDays / streak_res.totalTrackedDays) * 100.0, 1)
+    else:
+        adherence_pct = 100.0
+
+    # 5. Fetch recent alerts for this caregiver and patient
+    notif_coll = get_notifications_collection()
+    cg_user_oid = to_object_id(current_user["id"])
+    cursor = notif_coll.find({
+        "caregiverId": cg_user_oid,
+        "patientId": patient_oid,
+        "type": NotificationType.CAREGIVER_ALERT.value,
+    }).sort("createdAt", pymongo.DESCENDING).limit(5)
+
+    recent_alerts: List[CaregiverAlert] = []
+    async for doc in cursor:
+        meta = doc.get("metadata") or {}
+        sched_times = [meta.get("scheduledTime")] if meta.get("scheduledTime") else []
+        recent_alerts.append(CaregiverAlert(
+            patientId=str(patient_oid),
+            patientName=patient_name,
+            medicineName=meta.get("medicineName", "Medication"),
+            missedDosesCount=1,
+            scheduledTimes=sched_times,
+            alertMessage=doc.get("message", "Medication adherence alert"),
+            timestamp=doc.get("createdAt", now_utc()),
+        ))
+
+    return CaregiverMonitoringSummary(
+        patientId=str(patient_oid),
+        patientName=patient_name,
+        adherencePercentage=adherence_pct,
+        totalScheduledToday=total_scheduled,
+        takenToday=taken_today,
+        skippedToday=skipped_today,
+        missedToday=missed_today,
+        recentAlerts=recent_alerts,
+        currentStreak=streak_res.currentStreak,
+        longestStreak=streak_res.longestStreak,
+        permissionsNote="Read-only access. Prescription and schedule modifications are strictly prohibited.",
+    )
+
+
+@router.get(
+    "/alerts",
+    response_model=List[NotificationResponse],
+    summary="Retrieve caregiver alert notifications for the authenticated caregiver",
+)
+async def list_caregiver_alerts(
+    status_filter: Optional[NotificationStatus] = Query(None, alias="status", description="Filter by status (read/unread)"),
+    patientId: Optional[str] = Query(None, description="Filter by linked patient ID"),
+    limit: int = Query(50, ge=1, le=100, description="Max alerts to retrieve"),
+    current_user: Dict[str, Any] = Depends(get_current_caregiver),
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve caregiver alerts belonging to the authenticated caregiver.
+
+    Requirements:
+    1. Authenticate caregiver.
+    2. Query notifications collection where type=caregiver_alert and caregiverId=authenticated caregiver.
+    3. Never return another caregiver's alerts.
+    4. Support optional filtering by status and patientId.
+    5. Return alert id, alert type, read state, createdAt, patientId, and relevant metadata.
+    6. Zero sensitive auth fields exposed.
+    """
+    cg_user_oid = to_object_id(current_user["id"])
+    query: Dict[str, Any] = {
+        "caregiverId": cg_user_oid,
+        "type": NotificationType.CAREGIVER_ALERT.value,
+    }
+
+    if status_filter:
+        query["status"] = status_filter.value
+
+    if patientId:
+        if not is_valid_object_id(patientId):
+            return []
+        query["patientId"] = to_object_id(patientId)
+
+    notif_coll = get_notifications_collection()
+    cursor = notif_coll.find(query).sort("createdAt", pymongo.DESCENDING).limit(limit)
+
+    docs = await cursor.to_list(length=limit)
+    return [document_to_dict(d) for d in docs]
+
+
+@router.patch(
+    "/alerts/{alert_id}/read",
+    response_model=NotificationResponse,
+    summary="Mark a caregiver alert as read",
+)
+async def mark_caregiver_alert_read(
+    alert_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_caregiver),
+) -> Dict[str, Any]:
+    """
+    Mark a caregiver alert as read.
+
+    Requirements:
+    1. Authenticate caregiver.
+    2. Find notification by notification ID, caregiverId=caller, and type=caregiver_alert.
+    3. Atomically mark it read using CaregiverAlertService.
+    4. If alert belongs to another caregiver -> safe 404 (does not mutate).
+    5. Reject patient and non-caregiver callers (403).
+    """
+    if not is_valid_object_id(alert_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found.",
+        )
+
+    cg_user_oid = to_object_id(current_user["id"])
+    alert_oid = to_object_id(alert_id)
+
+    # First verify it is indeed a caregiver_alert type and owned by this caregiver
+    notif_coll = get_notifications_collection()
+    existing = await notif_coll.find_one({
+        "_id": alert_oid,
+        "caregiverId": cg_user_oid,
+        "type": NotificationType.CAREGIVER_ALERT.value,
+    })
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found.",
+        )
+
+    alert_service = CaregiverAlertService(notifications_collection=notif_coll)
+    updated = await alert_service.mark_alert_read(
+        caregiver_id=cg_user_oid,
+        notification_id=alert_oid,
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found.",
+        )
+
+    logger.info("Caregiver alert %s marked read by caregiver %s", alert_id, cg_user_oid)
+    return document_to_dict(updated)
+
