@@ -102,6 +102,7 @@ async def setup_indexes():
         # Caregivers indexes: patient's caregivers, unique relationship per email
         await db_manager.db[COLLECTION_CAREGIVERS].create_index([("patientId", pymongo.ASCENDING)])
         await db_manager.db[COLLECTION_CAREGIVERS].create_index([("caregiverEmail", pymongo.ASCENDING)])
+        await db_manager.db[COLLECTION_CAREGIVERS].create_index([("status", pymongo.ASCENDING)])
         await db_manager.db[COLLECTION_CAREGIVERS].create_index(
             [("patientId", pymongo.ASCENDING), ("caregiverEmail", pymongo.ASCENDING)],
             unique=True
