@@ -6,7 +6,13 @@
 
 import apiClient from "./client";
 import { ENDPOINTS } from "./endpoints";
-import { Caregiver, CaregiverCreatePayload } from "../types";
+import {
+  Caregiver,
+  CaregiverCreatePayload,
+  CaregiverMonitoringSummary,
+  CaregiverNotificationAlert,
+  LinkedPatient,
+} from "../types";
 
 /**
  * Retrieve caregiver relationships for the authenticated patient.
@@ -39,3 +45,65 @@ export async function createCaregiver(
 export async function revokeCaregiver(caregiverId: string): Promise<void> {
   await apiClient.delete(ENDPOINTS.CAREGIVERS.BY_ID(caregiverId));
 }
+
+/**
+ * Retrieve list of patients linked to the authenticated caregiver (Phase 9.2.5 / 9.2.7).
+ * Strictly read-only monitoring access.
+ */
+export async function getLinkedPatients(): Promise<LinkedPatient[]> {
+  const response = await apiClient.get<LinkedPatient[]>(
+    ENDPOINTS.CAREGIVERS.PATIENTS
+  );
+  return response.data;
+}
+
+/**
+ * Retrieve adherence monitoring summary for a linked patient (Phase 9.2.5 / 9.2.7).
+ * Optionally pass client reference date (YYYY-MM-DD).
+ */
+export async function getPatientSummary(
+  patientId: string,
+  clientDate?: string
+): Promise<CaregiverMonitoringSummary> {
+  const url = clientDate
+    ? `${ENDPOINTS.CAREGIVERS.PATIENT_SUMMARY(patientId)}?clientDate=${encodeURIComponent(clientDate)}`
+    : ENDPOINTS.CAREGIVERS.PATIENT_SUMMARY(patientId);
+  const response = await apiClient.get<CaregiverMonitoringSummary>(url);
+  return response.data;
+}
+
+/**
+ * Retrieve caregiver alert notifications for the authenticated caregiver (Phase 9.2.5 / 9.2.7).
+ * Supports status filtering ('unread' | 'read') and patientId filtering.
+ */
+export async function getCaregiverAlerts(
+  status?: "read" | "unread",
+  patientId?: string
+): Promise<CaregiverNotificationAlert[]> {
+  const params = new URLSearchParams();
+  if (status) {
+    params.append("status", status);
+  }
+  if (patientId) {
+    params.append("patientId", patientId);
+  }
+  const queryStr = params.toString();
+  const url = queryStr
+    ? `${ENDPOINTS.CAREGIVERS.ALERTS}?${queryStr}`
+    : ENDPOINTS.CAREGIVERS.ALERTS;
+  const response = await apiClient.get<CaregiverNotificationAlert[]>(url);
+  return response.data;
+}
+
+/**
+ * Mark a caregiver alert notification as read (Phase 9.2.5 / 9.2.7).
+ */
+export async function markCaregiverAlertRead(
+  alertId: string
+): Promise<CaregiverNotificationAlert> {
+  const response = await apiClient.patch<CaregiverNotificationAlert>(
+    ENDPOINTS.CAREGIVERS.MARK_ALERT_READ(alertId)
+  );
+  return response.data;
+}
+

@@ -51,6 +51,10 @@ export const ENDPOINTS = {
     BASE: "/caregivers",
     BY_ID: (id: string) => `/caregivers/${id}`,
     MONITOR: (patientId: string) => `/caregivers/monitor/${patientId}`,
+    PATIENTS: "/caregivers/patients",
+    PATIENT_SUMMARY: (patientId: string) => `/caregivers/patients/${patientId}/summary`,
+    ALERTS: "/caregivers/alerts",
+    MARK_ALERT_READ: (alertId: string) => `/caregivers/alerts/${alertId}/read`,
   },
 
   // Notifications

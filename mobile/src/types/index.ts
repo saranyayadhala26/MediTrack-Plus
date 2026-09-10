@@ -220,3 +220,59 @@ export interface StreakData {
   evaluatedDate: string;
 }
 
+export interface LinkedPatient {
+  patientId: string;
+  fullName: string;
+  email: string;
+  emergencyContact?: string | null;
+  relationship: string;
+  status: string;
+  linkedAt: string;
+}
+
+export interface CaregiverAlertItem {
+  patientId: string;
+  patientName: string;
+  medicineName: string;
+  missedDosesCount: number;
+  scheduledTimes: string[];
+  alertMessage: string;
+  timestamp: string;
+}
+
+export interface CaregiverMonitoringSummary {
+  patientId: string;
+  patientName: string;
+  adherencePercentage: number;
+  totalScheduledToday: number;
+  takenToday: number;
+  skippedToday: number;
+  missedToday: number;
+  recentAlerts: CaregiverAlertItem[];
+  currentStreak?: number;
+  longestStreak?: number;
+  permissionsNote: string;
+  medical_disclaimer?: string;
+}
+
+export interface CaregiverNotificationAlert {
+  id: string;
+  userId: string;
+  caregiverId?: string;
+  patientId?: string;
+  type: string;
+  alertType?: string;
+  title: string;
+  message: string;
+  status: "unread" | "read";
+  metadata?: {
+    medicineName?: string;
+    scheduledTime?: string;
+    scheduledDate?: string;
+    ruleType?: string;
+    [key: string]: any;
+  };
+  createdAt: string;
+}
+
+
