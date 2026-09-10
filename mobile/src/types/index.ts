@@ -126,8 +126,16 @@ export interface Caregiver {
   caregiverPhone: string;
   relationship: string;
   status: "active" | "pending" | "revoked";
+  permissionsNote?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CaregiverCreatePayload {
+  caregiverName: string;
+  caregiverEmail: string;
+  caregiverPhone: string;
+  relationship: string;
 }
 
 export interface NotificationItem {

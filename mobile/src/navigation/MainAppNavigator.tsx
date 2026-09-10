@@ -24,10 +24,11 @@ import { AddScheduleScreen } from "../screens/schedules/AddScheduleScreen";
 import { EditScheduleScreen } from "../screens/schedules/EditScheduleScreen";
 import { ActivityHistoryScreen } from "../screens/activities/ActivityHistoryScreen";
 import { CalendarScreen } from "../screens/calendar/CalendarScreen";
+import { CaregiverManagementScreen } from "../screens/caregivers/CaregiverManagementScreen";
 import { notificationService } from "../services/notificationService";
 import { MedicationSchedule, Medicine } from "../types";
 
-type MainTab = "dashboard" | "calendar" | "medicines" | "history";
+type MainTab = "dashboard" | "calendar" | "medicines" | "history" | "caregivers";
 type MedicineScreenMode =
   | "list"
   | "detail"
@@ -97,7 +98,12 @@ export const MainAppNavigator: React.FC = () => {
 
   const renderContent = () => {
     if (activeTab === "dashboard") {
-      return <HomeScreen onNavigateToMedicines={handleNavigateToMedicines} />;
+      return (
+        <HomeScreen
+          onNavigateToMedicines={handleNavigateToMedicines}
+          onNavigateToCaregivers={() => setActiveTab("caregivers")}
+        />
+      );
     }
 
     if (activeTab === "calendar") {
@@ -106,6 +112,10 @@ export const MainAppNavigator: React.FC = () => {
 
     if (activeTab === "history") {
       return <ActivityHistoryScreen />;
+    }
+
+    if (activeTab === "caregivers") {
+      return <CaregiverManagementScreen onBack={() => setActiveTab("dashboard")} />;
     }
 
     // Active tab is "medicines"
@@ -227,6 +237,7 @@ export const MainAppNavigator: React.FC = () => {
     activeTab === "dashboard" ||
     activeTab === "calendar" ||
     activeTab === "history" ||
+    activeTab === "caregivers" ||
     (activeTab === "medicines" && (medicineMode === "list" || medicineMode === "detail"));
 
   return (
@@ -335,6 +346,31 @@ export const MainAppNavigator: React.FC = () => {
               ]}
             >
               History
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === "caregivers" && styles.tabButtonActive]}
+            onPress={() => setActiveTab("caregivers")}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === "caregivers" }}
+            accessibilityLabel="Caregivers Tab"
+          >
+            <Text
+              style={[
+                styles.tabIcon,
+                activeTab === "caregivers" ? styles.tabIconActive : styles.tabIconInactive,
+              ]}
+            >
+              👥
+            </Text>
+            <Text
+              style={[
+                styles.tabLabel,
+                activeTab === "caregivers" ? styles.tabLabelActive : styles.tabLabelInactive,
+              ]}
+            >
+              Caregivers
             </Text>
           </TouchableOpacity>
         </View>

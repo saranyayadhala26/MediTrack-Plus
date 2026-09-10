@@ -20,9 +20,13 @@ import { useAuth } from "../../context/AuthContext";
 
 interface HomeScreenProps {
   onNavigateToMedicines?: (subScreen?: "list" | "add") => void;
+  onNavigateToCaregivers?: () => void;
 }
 
-export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToMedicines }) => {
+export const HomeScreen: React.FC<HomeScreenProps> = ({
+  onNavigateToMedicines,
+  onNavigateToCaregivers,
+}) => {
   const { user, logout, refreshProfile } = useAuth();
 
   const isCaregiver = user?.role === "caregiver";
@@ -92,6 +96,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigateToMedicines })
 
         {/* Phase 6: Local Medication Reminders & Alerts */}
         <NotificationStatusCard />
+
+        {/* Phase 9.2.6: Caregiver Access & Monitoring Card */}
+        {!isCaregiver && (
+          <Card style={styles.card}>
+            <Text style={styles.cardTitle}>Caregiver Access</Text>
+            <Text style={styles.cardDescription}>
+              Allow trusted family members or caregivers to monitor your medication adherence with
+              secure, read-only access.
+            </Text>
+            <Button
+              title="👥 Manage Caregivers"
+              onPress={() => onNavigateToCaregivers?.()}
+              variant="outline"
+              style={styles.caregiverButton}
+            />
+          </Card>
+        )}
 
         {/* Account Profile Card */}
         <Card style={styles.card}>
@@ -274,5 +295,8 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     marginVertical: spacing.lg,
+  },
+  caregiverButton: {
+    marginTop: spacing.xs,
   },
 });
