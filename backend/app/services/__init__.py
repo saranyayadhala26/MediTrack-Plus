@@ -17,6 +17,13 @@ from app.services.missed_dose_service import (
     classify_occurrence,
     resolve_effective_activity,
 )
+from app.services.missed_dose_rules import (
+    MissedDoseRuleEvaluator,
+    OccurrenceRuleEvaluation,
+    PatientRuleEvaluationSummary,
+    RuleQualificationType,
+    evaluate_occurrence_sequence,
+)
 
 __all__ = [
     "DATE_REGEX",
@@ -32,4 +39,9 @@ __all__ = [
     "OccurrenceClassification",
     "classify_occurrence",
     "resolve_effective_activity",
+    "MissedDoseRuleEvaluator",
+    "OccurrenceRuleEvaluation",
+    "PatientRuleEvaluationSummary",
+    "RuleQualificationType",
+    "evaluate_occurrence_sequence",
 ]
