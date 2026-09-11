@@ -12,6 +12,7 @@ export const ENDPOINTS = {
     LOGIN: "/auth/login",
     PROFILE: "/auth/me",
     UPDATE_PROFILE: "/auth/profile",
+    CHANGE_PASSWORD: "/auth/password",
   },
 
   // Medicines

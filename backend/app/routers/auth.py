@@ -9,6 +9,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db.mongodb import get_users_collection
 from app.models.collections import create_user_document, now_utc
 from app.schemas.user import (
+    PasswordChange,
     TokenResponse,
     UserLogin,
     UserRegister,
@@ -52,6 +53,7 @@ async def register(payload: UserRegister) -> TokenResponse:
         full_name=payload.fullName,
         password_hash=hashed,
         role=payload.role.value if hasattr(payload.role, "value") else str(payload.role),
+        phone=payload.phone,
         emergency_contact=payload.emergencyContact,
         health_conditions=[],
     )
@@ -132,7 +134,8 @@ async def update_profile(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> UserResponse:
     """
-    Allow users to update fullName, emergencyContact, and healthConditions.
+    Allow users to update fullName, phone, emergencyContact, healthConditions,
+    and notificationPreferences.
     Protected fields (role, _id, passwordHash, createdAt) are strictly preserved.
     """
     updates: Dict[str, Any] = {}
@@ -146,11 +149,17 @@ async def update_profile(
             )
         updates["fullName"] = stripped_name
 
+    if payload.phone is not None:
+        updates["phone"] = payload.phone.strip() if payload.phone else None
+
     if payload.emergencyContact is not None:
         updates["emergencyContact"] = payload.emergencyContact.strip() if payload.emergencyContact else None
 
     if payload.healthConditions is not None:
         updates["healthConditions"] = payload.healthConditions
+
+    if payload.notificationPreferences is not None:
+        updates["notificationPreferences"] = payload.notificationPreferences.model_dump()
 
     if updates:
         updates["updatedAt"] = now_utc()
@@ -162,3 +171,42 @@ async def update_profile(
         return UserResponse(**document_to_dict(updated_doc))
 
     return UserResponse(**current_user)
+
+
+@router.patch(
+    "/password",
+    status_code=status.HTTP_200_OK,
+    summary="Change password for authenticated user",
+)
+async def change_password(
+    payload: PasswordChange,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """
+    Securely update the authenticated user's password:
+    - Strictly authenticated via JWT identity.
+    - Validates current password against stored bcrypt hash.
+    - Returns HTTP 401 Unauthorized if current password is incorrect.
+    - Hashes new password with bcrypt (12 rounds).
+    - Updates passwordHash in database with updatedAt.
+    - Never logs or exposes passwords or password hashes.
+    """
+    user_oid = to_object_id(current_user["id"])
+    users_coll = get_users_collection()
+    user_doc = await users_coll.find_one({"_id": user_oid})
+
+    if not user_doc or not verify_password(payload.currentPassword, user_doc.get("passwordHash", "")):
+        logger.warning("Password change rejected: incorrect current password for user %s", current_user["id"])
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    new_hash = hash_password(payload.newPassword)
+    await users_coll.update_one(
+        {"_id": user_oid},
+        {"$set": {"passwordHash": new_hash, "updatedAt": now_utc()}},
+    )
+    logger.info("Password changed successfully for user %s", current_user["id"])
+    return {"message": "Password updated successfully."}

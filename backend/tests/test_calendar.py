@@ -279,7 +279,7 @@ async def test_date_range_filtering():
 
         await client.post(
             "/api/v1/schedules",
-            json={"medicineId": med_id, "time": "20:00", "frequencyType": "daily", "enabled": True},
+            json={"medicineId": med_id, "time": "20:00", "frequencyType": "daily", "startDate": "2026-09-10", "enabled": True},
             headers=headers,
         )
 
@@ -307,7 +307,7 @@ async def test_pending_occurrence():
 
         await client.post(
             "/api/v1/schedules",
-            json={"medicineId": med_id, "time": "09:00", "frequencyType": "daily", "enabled": True},
+            json={"medicineId": med_id, "time": "09:00", "frequencyType": "daily", "startDate": "2026-09-10", "enabled": True},
             headers=headers,
         )
 
@@ -724,12 +724,12 @@ async def test_multiple_medicines_same_day():
 
         await client.post(
             "/api/v1/schedules",
-            json={"medicineId": m1, "time": "08:00", "frequencyType": "daily", "enabled": True},
+            json={"medicineId": m1, "time": "08:00", "frequencyType": "daily", "startDate": "2026-09-10", "enabled": True},
             headers=headers,
         )
         await client.post(
             "/api/v1/schedules",
-            json={"medicineId": m2, "time": "09:00", "frequencyType": "daily", "enabled": True},
+            json={"medicineId": m2, "time": "09:00", "frequencyType": "daily", "startDate": "2026-09-10", "enabled": True},
             headers=headers,
         )
 

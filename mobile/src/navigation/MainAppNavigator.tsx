@@ -28,6 +28,7 @@ import { CaregiverManagementScreen } from "../screens/caregivers/CaregiverManage
 import { CaregiverDashboardScreen } from "../screens/caregivers/CaregiverDashboardScreen";
 import { PatientMonitoringDetailScreen } from "../screens/caregivers/PatientMonitoringDetailScreen";
 import { CaregiverAlertsScreen } from "../screens/caregivers/CaregiverAlertsScreen";
+import { ProfileScreen } from "../screens/profile/ProfileScreen";
 import { notificationService } from "../services/notificationService";
 import { LinkedPatient, MedicationSchedule, Medicine } from "../types";
 import { useAuth } from "../context/AuthContext";
@@ -54,6 +55,9 @@ export const MainAppNavigator: React.FC = () => {
   // Caregiver navigation state
   const [caregiverTab, setCaregiverTab] = useState<"dashboard" | "alerts">("dashboard");
   const [selectedPatient, setSelectedPatient] = useState<LinkedPatient | null>(null);
+
+  // Profile navigation state (Phase 10.1)
+  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
   // Setup notification channel, sync active schedules, and attach tap listener
   useEffect(() => {
@@ -110,6 +114,11 @@ export const MainAppNavigator: React.FC = () => {
   };
 
   const renderContent = () => {
+    // Dedicated Profile Experience (Phase 10.1)
+    if (isProfileOpen) {
+      return <ProfileScreen onBack={() => setIsProfileOpen(false)} />;
+    }
+
     // Caregiver Monitoring Experience (Phase 9.2.7)
     if (isCaregiver) {
       if (caregiverTab === "dashboard") {
@@ -128,6 +137,7 @@ export const MainAppNavigator: React.FC = () => {
           <CaregiverDashboardScreen
             onSelectPatient={(patient) => setSelectedPatient(patient)}
             onViewAlerts={() => setCaregiverTab("alerts")}
+            onNavigateToProfile={() => setIsProfileOpen(true)}
           />
         );
       }
@@ -147,6 +157,7 @@ export const MainAppNavigator: React.FC = () => {
         <HomeScreen
           onNavigateToMedicines={handleNavigateToMedicines}
           onNavigateToCaregivers={() => setActiveTab("caregivers")}
+          onNavigateToProfile={() => setIsProfileOpen(true)}
         />
       );
     }
@@ -277,8 +288,10 @@ export const MainAppNavigator: React.FC = () => {
     }
   };
 
-  // Hide bottom tab bar while user is actively filling out Add or Edit forms
-  const showTabBar = isCaregiver
+  // Hide bottom tab bar while user is actively filling out Add/Edit forms or viewing Profile
+  const showTabBar = isProfileOpen
+    ? false
+    : isCaregiver
     ? true
     : activeTab === "dashboard" ||
       activeTab === "calendar" ||

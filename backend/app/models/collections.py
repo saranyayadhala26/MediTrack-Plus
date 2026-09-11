@@ -26,6 +26,8 @@ def create_user_document(
     role: str = "patient",
     emergency_contact: Optional[str] = None,
     health_conditions: Optional[List[str]] = None,
+    phone: Optional[str] = None,
+    notification_preferences: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Factory creating a new persistent User document."""
     return {
@@ -34,8 +36,10 @@ def create_user_document(
         "fullName": full_name.strip(),
         "passwordHash": password_hash,
         "role": role,
+        "phone": phone.strip() if phone else None,
         "emergencyContact": emergency_contact.strip() if emergency_contact else None,
         "healthConditions": health_conditions or [],
+        "notificationPreferences": notification_preferences or {"medicationRemindersEnabled": True},
         "createdAt": now_utc(),
         "updatedAt": now_utc(),
     }

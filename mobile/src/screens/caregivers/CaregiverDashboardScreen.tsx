@@ -29,11 +29,13 @@ import { LinkedPatient } from "../../types";
 interface CaregiverDashboardScreenProps {
   onSelectPatient: (patient: LinkedPatient) => void;
   onViewAlerts: () => void;
+  onNavigateToProfile?: () => void;
 }
 
 export const CaregiverDashboardScreen: React.FC<CaregiverDashboardScreenProps> = ({
   onSelectPatient,
   onViewAlerts,
+  onNavigateToProfile,
 }) => {
   const { user, logout } = useAuth();
   const [patients, setPatients] = useState<LinkedPatient[]>([]);
@@ -115,14 +117,24 @@ export const CaregiverDashboardScreen: React.FC<CaregiverDashboardScreenProps> =
               Welcome, {user?.fullName || "Caregiver"}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={handleLogoutPress}
-            accessibilityRole="button"
-            accessibilityLabel="Log out of caregiver account"
-          >
-            <Text style={styles.logoutButtonText}>Log Out</Text>
-          </TouchableOpacity>
+          <View style={styles.headerButtonsRow}>
+            <TouchableOpacity
+              style={styles.profileButton}
+              onPress={() => onNavigateToProfile?.()}
+              accessibilityRole="button"
+              accessibilityLabel="View and edit caregiver profile"
+            >
+              <Text style={styles.profileButtonText}>👤 Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogoutPress}
+              accessibilityRole="button"
+              accessibilityLabel="Log out of caregiver account"
+            >
+              <Text style={styles.logoutButtonText}>Log Out</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Role & Access Badge */}
@@ -337,6 +349,24 @@ const styles = StyleSheet.create({
     color: colors.surface,
     opacity: 0.95,
     marginTop: 2,
+  },
+  headerButtonsRow: {
+    flexDirection: "row",
+    gap: spacing.xs,
+    alignItems: "center",
+  },
+  profileButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.4)",
+  },
+  profileButtonText: {
+    ...typography.caption,
+    color: colors.surface,
+    fontWeight: "700",
   },
   logoutButton: {
     backgroundColor: "rgba(255, 255, 255, 0.2)",

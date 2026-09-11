@@ -4,15 +4,27 @@
 
 export type UserRole = "patient" | "caregiver";
 
+export interface NotificationPreferences {
+  medicationRemindersEnabled: boolean;
+}
+
 export interface User {
   id: string;
   fullName: string;
   email: string;
   role: UserRole;
+  phone?: string;
   emergencyContact?: string;
   healthConditions?: string[];
+  notificationPreferences?: NotificationPreferences;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PasswordChangePayload {
+  currentPassword: string;
+  newPassword: string;
+  confirmNewPassword: string;
 }
 
 export type DosageUnit = "mg" | "ml" | "tablet" | "capsule" | "drop" | "puff" | "unit" | "other";

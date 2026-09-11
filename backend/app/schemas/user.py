@@ -11,12 +11,21 @@ class UserRole(str, Enum):
     CAREGIVER = "caregiver"
 
 
+class NotificationPreferences(BaseModel):
+    medicationRemindersEnabled: bool = Field(
+        default=True,
+        description="Enable local medication reminder alarms",
+    )
+
+
 class UserBase(BaseModel):
     email: EmailStr = Field(..., description="Unique user email address", examples=["user@example.com"])
     fullName: str = Field(..., min_length=2, max_length=100, description="Full legal or preferred name", examples=["Jane Doe"])
     role: UserRole = Field(default=UserRole.PATIENT, description="User role in MediTrack+")
+    phone: Optional[str] = Field(None, max_length=30, description="Phone contact number", examples=["+1-555-0100"])
     emergencyContact: Optional[str] = Field(None, max_length=50, description="Emergency phone or contact info", examples=["+1-555-0199"])
     healthConditions: Optional[List[str]] = Field(default_factory=list, description="Optional recorded health conditions (e.g. Hypertension)")
+    notificationPreferences: NotificationPreferences = Field(default_factory=NotificationPreferences, description="User notification preferences")
 
 
 class UserRegister(BaseModel):
@@ -25,6 +34,7 @@ class UserRegister(BaseModel):
     password: str = Field(..., min_length=6, max_length=128, description="Password (at least 6 characters)")
     confirmPassword: str = Field(..., min_length=6, max_length=128, description="Password confirmation")
     role: UserRole = Field(default=UserRole.PATIENT, description="Role: patient or caregiver")
+    phone: Optional[str] = Field(None, max_length=30, description="Optional phone contact number")
     emergencyContact: Optional[str] = Field(None, max_length=50, description="Optional emergency contact phone")
 
     @model_validator(mode="after")
@@ -41,8 +51,24 @@ class UserLogin(BaseModel):
 
 class UserUpdate(BaseModel):
     fullName: Optional[str] = Field(None, min_length=2, max_length=100)
+    phone: Optional[str] = Field(None, max_length=30)
     emergencyContact: Optional[str] = Field(None, max_length=50)
     healthConditions: Optional[List[str]] = Field(None, description="Updated health condition list")
+    notificationPreferences: Optional[NotificationPreferences] = Field(None, description="Updated notification preferences")
+
+
+class PasswordChange(BaseModel):
+    currentPassword: str = Field(..., min_length=1, description="Current plaintext password")
+    newPassword: str = Field(..., min_length=6, max_length=128, description="New password (at least 6 characters)")
+    confirmNewPassword: str = Field(..., min_length=6, max_length=128, description="Password confirmation")
+
+    @model_validator(mode="after")
+    def verify_password_rules(self) -> "PasswordChange":
+        if self.newPassword != self.confirmNewPassword:
+            raise ValueError("New passwords do not match.")
+        if self.currentPassword == self.newPassword:
+            raise ValueError("New password cannot be the same as the current password.")
+        return self
 
 
 class UserResponse(BaseModel):
@@ -50,8 +76,10 @@ class UserResponse(BaseModel):
     email: EmailStr
     fullName: str
     role: UserRole
+    phone: Optional[str] = None
     emergencyContact: Optional[str] = None
     healthConditions: List[str] = Field(default_factory=list)
+    notificationPreferences: NotificationPreferences = Field(default_factory=NotificationPreferences)
     createdAt: datetime
     updatedAt: datetime
 

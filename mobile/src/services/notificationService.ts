@@ -277,6 +277,17 @@ class NotificationService {
   }
 
   /**
+   * Cancel all local scheduled notifications across all schedules.
+   */
+  async cancelAllNotifications(): Promise<void> {
+    try {
+      await Notifications.cancelAllScheduledNotificationsAsync();
+    } catch (error) {
+      console.warn("NotificationService: Error cancelling all notifications:", error);
+    }
+  }
+
+  /**
    * Sync a modified schedule: cancels existing reminders and re-schedules if enabled.
    */
   async syncScheduleReminder(schedule: MedicationSchedule): Promise<string[]> {

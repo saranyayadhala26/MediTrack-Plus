@@ -9,6 +9,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Button } from "../../components/common/Button";
@@ -21,11 +22,13 @@ import { useAuth } from "../../context/AuthContext";
 interface HomeScreenProps {
   onNavigateToMedicines?: (subScreen?: "list" | "add") => void;
   onNavigateToCaregivers?: () => void;
+  onNavigateToProfile?: () => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigateToMedicines,
   onNavigateToCaregivers,
+  onNavigateToProfile,
 }) => {
   const { user, logout, refreshProfile } = useAuth();
 
@@ -38,8 +41,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.greeting}>Welcome back,</Text>
-          <Text style={styles.userName}>{user?.fullName || "User"}</Text>
+          <View style={styles.greetingContainer}>
+            <Text style={styles.greeting}>Welcome back,</Text>
+            <Text style={styles.userName}>{user?.fullName || "User"}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.profileHeaderButton}
+            onPress={() => onNavigateToProfile?.()}
+            accessibilityRole="button"
+            accessibilityLabel="Open user profile and settings"
+          >
+            <Text style={styles.profileHeaderButtonText}>👤 Profile</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Role Badge */}
@@ -136,12 +149,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <Text style={styles.valueSuccess}>Hardware-Backed SecureStore</Text>
           </View>
 
-          <Button
-            title="Refresh Profile"
-            onPress={refreshProfile}
-            variant="outline"
-            style={styles.refreshButton}
-          />
+          <View style={styles.profileActionRow}>
+            <Button
+              title="Edit Profile & Settings"
+              onPress={() => onNavigateToProfile?.()}
+              variant="primary"
+              style={styles.profileActionButton}
+            />
+            <Button
+              title="Refresh"
+              onPress={refreshProfile}
+              variant="outline"
+              style={styles.profileRefreshButton}
+            />
+          </View>
         </Card>
 
         {/* Phase Status Card */}
@@ -183,7 +204,26 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: borderRadius.lg,
   },
   headerTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: spacing.sm,
+  },
+  greetingContainer: {
+    flex: 1,
+  },
+  profileHeaderButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.4)",
+  },
+  profileHeaderButtonText: {
+    ...typography.caption,
+    color: colors.textInverse,
+    fontWeight: "700",
   },
   greeting: {
     ...typography.body,
@@ -284,6 +324,17 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     marginTop: spacing.md,
+  },
+  profileActionRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  profileActionButton: {
+    flex: 1.6,
+  },
+  profileRefreshButton: {
+    flex: 1,
   },
   actionRow: {
     flexDirection: "row",

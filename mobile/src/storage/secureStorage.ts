@@ -12,6 +12,12 @@ const SECURE_KEYS = {
   USER_SESSION: "meditrack_auth_user_session",
 };
 
+export interface AuthSessionCredentials {
+  id: string;
+  email: string;
+  role: string;
+}
+
 export const secureStorage = {
   /**
    * Securely store the JWT access token in hardware-backed keychain / Keystore.
@@ -50,13 +56,23 @@ export const secureStorage = {
   },
 
   /**
-   * Securely persist user profile / session data.
+   * Securely persist minimal user session authorization credentials (id, email, role).
+   * Strictly excludes ordinary profile fields (fullName, phone, emergencyContact,
+   * notificationPreferences) from hardware-backed SecureStore.
    */
-  async saveUser(user: User): Promise<void> {
+  async saveUser(user: Partial<User>): Promise<void> {
     try {
+      if (!user || !user.id || !user.email || !user.role) {
+        return;
+      }
+      const sessionData: AuthSessionCredentials = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      };
       await SecureStore.setItemAsync(
         SECURE_KEYS.USER_SESSION,
-        JSON.stringify(user),
+        JSON.stringify(sessionData),
         { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK }
       );
     } catch (error) {
@@ -65,9 +81,9 @@ export const secureStorage = {
   },
 
   /**
-   * Retrieve user profile from SecureStore.
+   * Retrieve minimal session credentials from SecureStore.
    */
-  async getUser(): Promise<User | null> {
+  async getUser(): Promise<AuthSessionCredentials | null> {
     try {
       const data = await SecureStore.getItemAsync(SECURE_KEYS.USER_SESSION);
       return data ? JSON.parse(data) : null;

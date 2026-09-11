@@ -9,7 +9,7 @@ import apiClient from "../api/client";
 import { ENDPOINTS } from "../api/endpoints";
 import { config } from "../constants/config";
 import { secureStorage } from "../storage/secureStorage";
-import { User, UserRole } from "../types";
+import { PasswordChangePayload, User, UserRole } from "../types";
 
 interface AuthContextType {
   user: User | null;
@@ -28,6 +28,9 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
+  changePassword: (
+    payload: PasswordChangePayload
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -46,13 +49,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (storedToken && storedUser) {
           setToken(storedToken);
-          setUser(storedUser);
+          setUser(storedUser as unknown as User);
 
-          // Proactively verify token validity against backend /auth/me
+          // Proactively verify token validity against backend /auth/me and load authoritative profile
           try {
             const response = await apiClient.get(ENDPOINTS.AUTH.PROFILE);
+            // In-memory state receives authoritative profile from MongoDB Atlas; ordinary fields are never persisted in SecureStore.
             setUser(response.data);
-            await secureStorage.saveUser(response.data);
           } catch (verifyError: any) {
             // Token expired or invalid
             if (verifyError.response && verifyError.response.status === 401) {
@@ -208,7 +211,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await apiClient.patch(ENDPOINTS.AUTH.UPDATE_PROFILE, data);
       const updatedUser = response.data;
-      await secureStorage.saveUser(updatedUser);
+      // Per SecureStore rule: do not duplicate ordinary profile fields to SecureStore.
+      // Backend/MongoDB is source of truth.
       setUser(updatedUser);
       return { success: true };
     } catch (err: any) {
@@ -220,10 +224,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshProfile = async (): Promise<void> => {
     try {
       const response = await apiClient.get(ENDPOINTS.AUTH.PROFILE);
-      await secureStorage.saveUser(response.data);
       setUser(response.data);
     } catch (err) {
       console.error("Error refreshing profile:", err);
+    }
+  };
+
+  const changePassword = async (
+    payload: PasswordChangePayload
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await apiClient.patch(ENDPOINTS.AUTH.CHANGE_PASSWORD, payload);
+      return { success: true };
+    } catch (err: any) {
+      let message = "Failed to update password.";
+      if (err.response?.data?.detail) {
+        if (typeof err.response.data.detail === "string") {
+          message = err.response.data.detail;
+        } else if (Array.isArray(err.response.data.detail)) {
+          message = err.response.data.detail
+            .map((d: any) =>
+              typeof d.msg === "string"
+                ? d.msg.replace(/^Value error,\s*/i, "")
+                : JSON.stringify(d)
+            )
+            .join("; ");
+        }
+      } else if (err.response?.status === 401) {
+        message = "Current password is incorrect.";
+      }
+      return { success: false, error: message };
     }
   };
 
@@ -239,6 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         updateProfile,
         refreshProfile,
+        changePassword,
       }}
     >
       {children}
