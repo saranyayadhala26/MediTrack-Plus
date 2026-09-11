@@ -189,6 +189,7 @@ export const AddScheduleScreen: React.FC<AddScheduleScreenProps> = ({
       const createdSchedule = await createSchedule(payload);
       try {
         await notificationService.scheduleScheduleReminder(createdSchedule);
+        await notificationService.autoSync({ force: true });
       } catch (notifErr) {
         console.warn("Failed to schedule local reminder:", notifErr);
       }

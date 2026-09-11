@@ -7,6 +7,7 @@
 
 import * as Notifications from "expo-notifications";
 import { Linking, Platform } from "react-native";
+import { getSchedules } from "../api/schedules";
 import { MedicationSchedule } from "../types";
 
 export const MEDICATION_CHANNEL_ID = "medication-reminders";
@@ -37,8 +38,28 @@ export interface ReconciliationResult {
   timestamp: string;
 }
 
+export type SyncStatusLabel =
+  | "synchronized"
+  | "syncing"
+  | "disabled"
+  | "permission_required"
+  | "offline";
+
+export interface SyncStatus {
+  isSyncing: boolean;
+  lastSyncTime: string | null;
+  activeCount: number;
+  statusLabel: SyncStatusLabel;
+  error?: string;
+}
+
 class NotificationService {
   private isInitialized = false;
+  private reconciliationPromise: Promise<ReconciliationResult> | null = null;
+  private lastSyncTimestamp = 0;
+  private readonly SYNC_THROTTLE_MS = 15_000;
+  private remindersEnabled = true;
+  private statusListeners: Array<(status: SyncStatus) => void> = [];
 
   /**
    * Initialize notification channels and settings.
@@ -338,7 +359,7 @@ class NotificationService {
           // Extract scheduleId from identifier pattern `meditrack-sched-${scheduleId}-...`
           const parts = id.replace("meditrack-sched-", "").split("-");
           schedId = parts[0];
-        } else {
+        } else if (!id.startsWith("meditrack-snooze-") && !id.startsWith("meditrack-test-")) {
           schedId =
             (item.content?.data?.scheduleId as string) ||
             ((item as any)?.request?.content?.data?.scheduleId as string) ||
@@ -351,7 +372,15 @@ class NotificationService {
             await Notifications.cancelScheduledNotificationAsync(item.identifier);
             cancelledCount++;
           } else {
-            currentlyScheduledIds.add(schedId);
+            // Check if remote time changed
+            const matchingSched = activeEnabledSchedules.find((s) => s.id === schedId);
+            const itemData = item.content?.data || (item as any)?.request?.content?.data;
+            if (matchingSched && itemData?.time && itemData.time !== matchingSched.time) {
+              await Notifications.cancelScheduledNotificationAsync(item.identifier);
+              cancelledCount++;
+            } else {
+              currentlyScheduledIds.add(schedId);
+            }
           }
         }
       }
@@ -364,7 +393,7 @@ class NotificationService {
         }
       }
 
-      const totalActiveReminders = (await Notifications.getAllScheduledNotificationsAsync()).length;
+      const totalActiveReminders = await this.getScheduledRemindersCount();
 
       return {
         activeCount: totalActiveReminders,
@@ -380,6 +409,137 @@ class NotificationService {
         cancelledCount: 0,
         timestamp: new Date().toISOString(),
       };
+    }
+  }
+
+  /**
+   * Automatic schedule reconciliation with in-flight mutex, debounce throttle,
+   * offline tolerance, and preference awareness.
+   */
+  async autoSync(options?: {
+    force?: boolean;
+    remindersEnabled?: boolean;
+  }): Promise<ReconciliationResult> {
+    await this.initialize();
+
+    if (options?.remindersEnabled !== undefined) {
+      this.remindersEnabled = options.remindersEnabled;
+    }
+
+    // 1. Preference guard: if user explicitly disabled medication reminders, cancel all
+    if (!this.remindersEnabled) {
+      await this.cancelAllNotifications();
+      const result: ReconciliationResult = {
+        activeCount: 0,
+        scheduledCount: 0,
+        cancelledCount: 0,
+        timestamp: new Date().toISOString(),
+      };
+      this.lastSyncTimestamp = Date.now();
+      this.notifyStatusListeners({
+        isSyncing: false,
+        lastSyncTime: result.timestamp,
+        activeCount: 0,
+        statusLabel: "disabled",
+      });
+      return result;
+    }
+
+    // 2. Permission check
+    const perm = await this.checkPermissions();
+    if (!perm.granted) {
+      const currentCount = await this.getScheduledRemindersCount();
+      this.notifyStatusListeners({
+        isSyncing: false,
+        lastSyncTime: this.lastSyncTimestamp ? new Date(this.lastSyncTimestamp).toISOString() : null,
+        activeCount: currentCount,
+        statusLabel: "permission_required",
+      });
+      return {
+        activeCount: currentCount,
+        scheduledCount: 0,
+        cancelledCount: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // 3. Debounce / throttle check: avoid redundant network requests if sync ran recently
+    const now = Date.now();
+    if (!options?.force && now - this.lastSyncTimestamp < this.SYNC_THROTTLE_MS) {
+      const currentCount = await this.getScheduledRemindersCount();
+      return {
+        activeCount: currentCount,
+        scheduledCount: 0,
+        cancelledCount: 0,
+        timestamp: new Date(this.lastSyncTimestamp).toISOString(),
+      };
+    }
+
+    // 4. In-flight mutex: coalesce simultaneous reconciliation calls into the same promise
+    if (this.reconciliationPromise) {
+      return this.reconciliationPromise;
+    }
+
+    this.notifyStatusListeners({
+      isSyncing: true,
+      lastSyncTime: this.lastSyncTimestamp ? new Date(this.lastSyncTimestamp).toISOString() : null,
+      activeCount: await this.getScheduledRemindersCount(),
+      statusLabel: "syncing",
+    });
+
+    this.reconciliationPromise = (async () => {
+      try {
+        const schedulesRes = await getSchedules();
+        const items = schedulesRes?.items || [];
+        const result = await this.reconcileAllSchedules(items);
+        this.lastSyncTimestamp = Date.now();
+        this.notifyStatusListeners({
+          isSyncing: false,
+          lastSyncTime: result.timestamp,
+          activeCount: result.activeCount,
+          statusLabel: "synchronized",
+        });
+        return result;
+      } catch {
+        // Offline / network failure: preserve existing local device reminders gracefully
+        const currentCount = await this.getScheduledRemindersCount();
+        this.notifyStatusListeners({
+          isSyncing: false,
+          lastSyncTime: this.lastSyncTimestamp ? new Date(this.lastSyncTimestamp).toISOString() : null,
+          activeCount: currentCount,
+          statusLabel: "offline",
+        });
+        return {
+          activeCount: currentCount,
+          scheduledCount: 0,
+          cancelledCount: 0,
+          timestamp: new Date().toISOString(),
+        };
+      } finally {
+        this.reconciliationPromise = null;
+      }
+    })();
+
+    return this.reconciliationPromise;
+  }
+
+  /**
+   * Subscribe a component or screen to automatic sync status updates.
+   */
+  addSyncStatusListener(listener: (status: SyncStatus) => void): () => void {
+    this.statusListeners.push(listener);
+    return () => {
+      this.statusListeners = this.statusListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private notifyStatusListeners(status: SyncStatus): void {
+    for (const listener of this.statusListeners) {
+      try {
+        listener(status);
+      } catch {
+        // Ignore errors in listeners
+      }
     }
   }
 
@@ -466,7 +626,12 @@ class NotificationService {
   async getScheduledRemindersCount(): Promise<number> {
     try {
       const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-      return scheduled.length;
+      const count = scheduled.filter(
+        (item) =>
+          item.identifier.startsWith("meditrack-sched-") ||
+          item.identifier.startsWith("meditrack-snooze-")
+      ).length;
+      return count;
     } catch {
       return 0;
     }

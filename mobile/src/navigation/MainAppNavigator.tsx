@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState } from "react";
 import {
+  AppState,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -68,20 +69,20 @@ export const MainAppNavigator: React.FC = () => {
     if (isCaregiver) return;
     let isMounted = true;
 
-    // Initialize notification channel and reconcile existing MongoDB schedules
-    notificationService
-      .initialize()
-      .then(() => getSchedules())
-      .then((res) => {
-        if (isMounted && res?.items) {
-          notificationService.reconcileAllSchedules(res.items).catch(() => {});
-        }
-      })
-      .catch((err) => {
-        console.warn("MainAppNavigator: Error reconciling notifications on launch:", err);
-      });
+    const remindersEnabled = user?.notificationPreferences?.medicationRemindersEnabled ?? true;
 
-    // 1. Foreground notification receipt: show DoseAlarmModal immediately (Phase 10.2)
+    // 1. Initial startup/login reconciliation
+    notificationService.autoSync({ force: true, remindersEnabled }).catch(() => {});
+
+    // 2. Returning to foreground: reconcile with throttle protection
+    const appStateSub = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active" && isMounted) {
+        const currentEnabled = user?.notificationPreferences?.medicationRemindersEnabled ?? true;
+        notificationService.autoSync({ force: false, remindersEnabled: currentEnabled }).catch(() => {});
+      }
+    });
+
+    // 3. Foreground notification receipt: show DoseAlarmModal immediately (Phase 10.2)
     const receivedSub = notificationService.addNotificationReceivedListener((notification) => {
       if (!isMounted) return;
       const data = (notification?.request?.content?.data as any) || {};
@@ -103,7 +104,7 @@ export const MainAppNavigator: React.FC = () => {
       }
     });
 
-    // 2. Notification response (tap): show DoseAlarmModal or deep link to MedicineDetail
+    // 4. Notification response (tap): show DoseAlarmModal or deep link to MedicineDetail
     const responseSub = notificationService.addNotificationResponseListener((response) => {
       if (!isMounted) return;
       const data = (response?.notification?.request?.content?.data as any) || {};
@@ -142,10 +143,11 @@ export const MainAppNavigator: React.FC = () => {
 
     return () => {
       isMounted = false;
+      appStateSub.remove();
       receivedSub.remove();
       responseSub.remove();
     };
-  }, []);
+  }, [isCaregiver, user?.notificationPreferences?.medicationRemindersEnabled]);
 
   const handleNavigateToMedicines = (subScreen?: "list" | "add") => {
     setActiveTab("medicines");

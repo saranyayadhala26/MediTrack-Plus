@@ -7,6 +7,7 @@
 import React, { useState } from "react";
 import {
   Alert,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -156,6 +157,7 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
       const updated = await updateSchedule(schedule.id, payload);
       try {
         await notificationService.syncScheduleReminder(updated);
+        await notificationService.autoSync({ force: true });
       } catch (notifErr) {
         console.warn("Failed to sync local reminder:", notifErr);
       }
@@ -180,7 +182,7 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
 
-      {/* Header */}
+      {/* Header with Android status-bar clearance */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
@@ -208,22 +210,30 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
         )}
 
         <Card style={styles.formCard}>
-          {/* Medicine Info */}
+          {/* Section: Medication Header */}
           <Text style={styles.fieldLabel}>Medication</Text>
-          <View style={styles.selectedMedBox}>
-            <Text style={styles.selectedMedName}>
-              {schedule.medicineName || "Prescribed Medicine"}
-            </Text>
-            {schedule.dosage && (
-              <Text style={styles.selectedMedDetails}>
-                {schedule.dosage} {schedule.dosageUnit || ""}
+          <View style={styles.selectedMedCard}>
+            <View style={styles.medIconBadge}>
+              <Text style={styles.medIconText}>💊</Text>
+            </View>
+            <View style={styles.selectedMedContent}>
+              <Text style={styles.selectedMedName}>
+                {schedule.medicineName || "Prescribed Medicine"}
               </Text>
-            )}
+              {schedule.dosage && (
+                <Text style={styles.selectedMedDetails}>
+                  Dosage: {schedule.dosage} {schedule.dosageUnit || ""}
+                </Text>
+              )}
+            </View>
           </View>
 
-          {/* Time Picker & Presets */}
-          <Text style={styles.fieldLabel}>Scheduled Time (24-Hour HH:MM) *</Text>
-          <View style={styles.chipsRow}>
+          {/* Section: Scheduled Time */}
+          <Text style={styles.fieldLabel}>
+            Scheduled Time <Text style={styles.requiredAsterisk}>*</Text>
+          </Text>
+          <Text style={styles.fieldHint}>Select a common intake time or enter an exact 24-hour time.</Text>
+          <View style={styles.chipsGrid}>
             {TIME_PRESETS.map((p) => {
               const isSelected = time === p.time;
               return (
@@ -234,6 +244,8 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
                     if (errors.time) setErrors({ ...errors, time: "" });
                   }}
                   style={[styles.chip, isSelected && styles.chipSelected]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
                 >
                   <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
                     {p.label}
@@ -243,30 +255,39 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
             })}
           </View>
 
-          <Input
-            label="Exact Time"
-            placeholder="e.g., 08:30"
-            value={time}
-            onChangeText={(t) => {
-              setTime(t);
-              if (errors.time) setErrors({ ...errors, time: "" });
-            }}
-            error={errors.time}
-          />
+          <View style={styles.exactTimeSection}>
+            <Input
+              label="Exact Time (24-Hour HH:MM)"
+              placeholder="e.g., 08:30"
+              value={time}
+              onChangeText={(t) => {
+                setTime(t);
+                if (errors.time) setErrors({ ...errors, time: "" });
+              }}
+              error={errors.time}
+            />
+          </View>
 
-          {/* Frequency Type Selector */}
-          <Text style={styles.fieldLabel}>Schedule Frequency *</Text>
-          <View style={styles.freqTabsRow}>
+          {/* Section: Frequency Type Selector */}
+          <Text style={styles.fieldLabel}>
+            Schedule Frequency <Text style={styles.requiredAsterisk}>*</Text>
+          </Text>
+          <View style={styles.freqSegmentContainer}>
             {(["daily", "weekly", "custom"] as ScheduleFrequency[]).map((f) => {
               const isSelected = frequencyType === f;
               return (
                 <TouchableOpacity
                   key={f}
                   onPress={() => setFrequencyType(f)}
-                  style={[styles.freqTab, isSelected && styles.freqTabSelected]}
+                  style={[styles.freqSegment, isSelected && styles.freqSegmentSelected]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
                 >
                   <Text
-                    style={[styles.freqTabText, isSelected && styles.freqTabTextSelected]}
+                    style={[
+                      styles.freqSegmentText,
+                      isSelected && styles.freqSegmentTextSelected,
+                    ]}
                   >
                     {f.charAt(0).toUpperCase() + f.slice(1)}
                   </Text>
@@ -278,7 +299,9 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
           {/* Weekly Days Selector */}
           {frequencyType === "weekly" && (
             <View style={styles.weeklySection}>
-              <Text style={styles.fieldLabel}>Select Intake Days *</Text>
+              <Text style={styles.fieldLabel}>
+                Select Intake Days <Text style={styles.requiredAsterisk}>*</Text>
+              </Text>
               <View style={styles.daysRow}>
                 {WEEKDAYS.map(({ day, label }) => {
                   const isSelected = selectedDays.includes(day);
@@ -287,6 +310,9 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
                       key={day}
                       onPress={() => toggleDay(day)}
                       style={[styles.dayCircle, isSelected && styles.dayCircleSelected]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={label}
                     >
                       <Text
                         style={[
@@ -320,51 +346,76 @@ export const EditScheduleScreen: React.FC<EditScheduleScreenProps> = ({
             </View>
           )}
 
-          {/* Start & End Dates */}
-          <View style={styles.dateRow}>
-            <View style={styles.halfInput}>
-              <Input
-                label="Schedule Start"
-                placeholder="YYYY-MM-DD"
-                value={startDate}
-                onChangeText={(t) => {
-                  setStartDate(t);
-                  if (errors.startDate) setErrors({ ...errors, startDate: "" });
-                }}
-                error={errors.startDate}
-              />
+          {/* Section: Start & End Dates */}
+          <View style={styles.dateSection}>
+            <View style={styles.dateRow}>
+              <View style={styles.halfInput}>
+                <Input
+                  label="Schedule Start"
+                  placeholder="YYYY-MM-DD"
+                  value={startDate}
+                  onChangeText={(t) => {
+                    setStartDate(t);
+                    if (errors.startDate) setErrors({ ...errors, startDate: "" });
+                  }}
+                  error={errors.startDate}
+                />
+              </View>
+              <View style={styles.halfInput}>
+                <Input
+                  label="Schedule End"
+                  placeholder="YYYY-MM-DD"
+                  value={endDate}
+                  onChangeText={(t) => {
+                    setEndDate(t);
+                    if (errors.endDate) setErrors({ ...errors, endDate: "" });
+                  }}
+                  error={errors.endDate}
+                />
+              </View>
             </View>
-            <View style={styles.halfInput}>
-              <Input
-                label="Schedule End"
-                placeholder="YYYY-MM-DD"
-                value={endDate}
-                onChangeText={(t) => {
-                  setEndDate(t);
-                  if (errors.endDate) setErrors({ ...errors, endDate: "" });
-                }}
-                error={errors.endDate}
-              />
-            </View>
+            <Text style={styles.dateHintText}>
+              Optional: Leave blank for ongoing schedules. Format: YYYY-MM-DD.
+            </Text>
           </View>
 
-          {/* Active Status Toggle */}
-          <View style={styles.toggleRow}>
-            <View>
-              <Text style={styles.toggleLabel}>Active Schedule</Text>
+          {/* Section: Active Status Toggle */}
+          <View style={styles.toggleCard}>
+            <View style={styles.toggleTextContainer}>
+              <View style={styles.toggleTitleRow}>
+                <Text style={styles.toggleLabel}>Active Schedule</Text>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    enabled ? styles.statusBadgeActive : styles.statusBadgePaused,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.statusBadgeText,
+                      enabled ? styles.statusBadgeTextActive : styles.statusBadgeTextPaused,
+                    ]}
+                  >
+                    {enabled ? "Active" : "Paused"}
+                  </Text>
+                </View>
+              </View>
               <Text style={styles.toggleSubLabel}>
-                {enabled ? "Schedule is active." : "Schedule is paused."}
+                {enabled
+                  ? "Alarms and reminders will sound at scheduled times."
+                  : "Reminders for this time slot are temporarily paused."}
               </Text>
             </View>
             <Switch
               value={enabled}
               onValueChange={setEnabled}
-              trackColor={{ false: colors.border, true: colors.primaryLight }}
-              thumbColor={enabled ? colors.primary : colors.textMuted}
+              trackColor={{ false: colors.borderLight, true: colors.primaryLight }}
+              thumbColor={enabled ? colors.primaryDark : colors.surfaceSubtle}
+              accessibilityLabel="Toggle active status for this schedule"
             />
           </View>
 
-          {/* Save Changes Button */}
+          {/* Section: Save Changes Button */}
           <Button
             title={isSubmitting ? "Updating..." : "Save Changes"}
             onPress={handleSubmit}
@@ -385,15 +436,24 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.md,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   backButton: {
+    minHeight: 40,
+    minWidth: 70,
+    justifyContent: "center",
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: borderRadius.sm,
   },
   backText: {
     ...typography.body,
@@ -404,12 +464,15 @@ const styles = StyleSheet.create({
     ...typography.h3,
     color: colors.textInverse,
     fontWeight: "700",
+    flex: 1,
+    textAlign: "center",
   },
   headerSpacer: {
-    width: 60,
+    width: 70,
   },
   scrollContent: {
     padding: spacing.md,
+    paddingBottom: spacing.xxl,
   },
   disclaimerBox: {
     backgroundColor: "#FEF2F2",
@@ -449,16 +512,44 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     ...typography.body,
-    fontWeight: "600",
+    fontWeight: "700",
     color: colors.textPrimary,
     marginBottom: spacing.xs,
     marginTop: spacing.xs,
   },
-  selectedMedBox: {
+  requiredAsterisk: {
+    color: colors.error,
+    fontWeight: "700",
+  },
+  fieldHint: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  selectedMedCard: {
     backgroundColor: colors.primaryLight,
     padding: spacing.md,
     borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: "rgba(13, 148, 136, 0.2)",
+  },
+  medIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medIconText: {
+    fontSize: 20,
+  },
+  selectedMedContent: {
+    flex: 1,
   },
   selectedMedName: {
     ...typography.h3,
@@ -469,20 +560,25 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.primaryDark,
     marginTop: 2,
+    fontWeight: "600",
   },
-  chipsRow: {
+  chipsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    justifyContent: "space-between",
     gap: spacing.xs,
     marginBottom: spacing.md,
   },
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    width: "48%",
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
     borderRadius: borderRadius.md,
     backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    paddingHorizontal: spacing.sm,
   },
   chipSelected: {
     backgroundColor: colors.secondaryLight,
@@ -491,39 +587,51 @@ const styles = StyleSheet.create({
   chipText: {
     ...typography.caption,
     color: colors.textSecondary,
+    fontWeight: "600",
   },
   chipTextSelected: {
     color: colors.secondaryDark,
     fontWeight: "700",
   },
-  freqTabsRow: {
-    flexDirection: "row",
-    gap: spacing.xs,
+  exactTimeSection: {
     marginBottom: spacing.md,
   },
-  freqTab: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.md,
+  freqSegmentContainer: {
+    flexDirection: "row",
     backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    padding: 4,
+    marginBottom: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
+  },
+  freqSegment: {
+    flex: 1,
+    minHeight: 42,
+    justifyContent: "center",
     alignItems: "center",
+    borderRadius: borderRadius.sm,
   },
-  freqTabSelected: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
+  freqSegmentSelected: {
+    backgroundColor: colors.primary,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  freqTabText: {
-    ...typography.caption,
+  freqSegmentText: {
+    ...typography.body,
+    fontSize: 14,
+    fontWeight: "600",
     color: colors.textSecondary,
   },
-  freqTabTextSelected: {
-    color: colors.primaryDark,
+  freqSegmentTextSelected: {
+    color: colors.textInverse,
     fontWeight: "700",
   },
   weeklySection: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   daysRow: {
     flexDirection: "row",
@@ -531,12 +639,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   dayCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -545,7 +653,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primaryDark,
   },
   dayCircleText: {
-    ...typography.small,
+    ...typography.caption,
     fontWeight: "600",
     color: colors.textSecondary,
   },
@@ -556,6 +664,9 @@ const styles = StyleSheet.create({
   customSection: {
     marginBottom: spacing.md,
   },
+  dateSection: {
+    marginBottom: spacing.md,
+  },
   dateRow: {
     flexDirection: "row",
     gap: spacing.md,
@@ -563,32 +674,75 @@ const styles = StyleSheet.create({
   halfInput: {
     flex: 1,
   },
-  toggleRow: {
+  dateHintText: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  toggleCard: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
     marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  toggleTextContainer: {
+    flex: 1,
+    marginRight: spacing.md,
+  },
+  toggleTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   toggleLabel: {
     ...typography.body,
     fontWeight: "700",
     color: colors.textPrimary,
   },
+  statusBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  statusBadgeActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  statusBadgePaused: {
+    backgroundColor: colors.borderLight,
+  },
+  statusBadgeText: {
+    ...typography.caption,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  statusBadgeTextActive: {
+    color: colors.primaryDark,
+  },
+  statusBadgeTextPaused: {
+    color: colors.textMuted,
+  },
   toggleSubLabel: {
     ...typography.small,
-    color: colors.textMuted,
-    marginTop: 2,
+    color: colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 18,
   },
   submitButton: {
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
+    minHeight: 50,
+    borderRadius: borderRadius.md,
   },
   errorText: {
     ...typography.caption,
     color: colors.error,
-    marginTop: -spacing.xs,
+    marginTop: spacing.xs,
     marginBottom: spacing.sm,
   },
 });

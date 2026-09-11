@@ -13,29 +13,36 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { getSchedules } from "../../api/schedules";
 import { Button } from "../common/Button";
 import { Card } from "../common/Card";
 import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { useAuth } from "../../context/AuthContext";
 import {
   NotificationPermissionState,
-  ReconciliationResult,
+  SyncStatus,
   notificationService,
 } from "../../services/notificationService";
 
 export const NotificationStatusCard: React.FC = () => {
+  const { user } = useAuth();
+  const remindersEnabled = user?.notificationPreferences?.medicationRemindersEnabled !== false;
+
   const [permission, setPermission] = useState<NotificationPermissionState | null>(null);
   const [scheduledCount, setScheduledCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isReconciling, setIsReconciling] = useState<boolean>(false);
-  const [isSendingTest, setIsSendingTest] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    lastSyncTime: null,
+    activeCount: 0,
+    statusLabel: remindersEnabled ? "synchronized" : "disabled",
+  });
 
-  const refreshStatus = async () => {
+  const refreshStatus = async (force: boolean = false) => {
     try {
       const perm = await notificationService.checkPermissions();
       setPermission(perm);
-      const count = await notificationService.getScheduledRemindersCount();
-      setScheduledCount(count);
+      const res = await notificationService.autoSync({ force, remindersEnabled });
+      setScheduledCount(res.activeCount);
     } catch (err) {
       console.warn("Error refreshing notification status:", err);
     } finally {
@@ -44,8 +51,18 @@ export const NotificationStatusCard: React.FC = () => {
   };
 
   useEffect(() => {
-    refreshStatus();
-  }, []);
+    // Subscribe to notification service automatic sync status updates
+    const unsubscribe = notificationService.addSyncStatusListener((status) => {
+      setSyncStatus(status);
+      setScheduledCount(status.activeCount);
+    });
+
+    refreshStatus(false);
+
+    return () => {
+      unsubscribe();
+    };
+  }, [remindersEnabled]);
 
   const handleRequestPermission = async () => {
     setIsLoading(true);
@@ -54,6 +71,7 @@ export const NotificationStatusCard: React.FC = () => {
       setPermission(res);
       if (res.granted) {
         Alert.alert("Permission Granted", "Medication reminder alerts are now active.");
+        await notificationService.autoSync({ force: true });
       } else {
         Alert.alert(
           "Permission Required",
@@ -68,48 +86,7 @@ export const NotificationStatusCard: React.FC = () => {
       Alert.alert("Error", "Could not request notification permissions.");
     } finally {
       setIsLoading(false);
-      refreshStatus();
-    }
-  };
-
-  const handleSendTestReminder = async () => {
-    setIsSendingTest(true);
-    try {
-      await notificationService.sendTestReminder();
-      Alert.alert(
-        "Test Scheduled",
-        "A test notification will trigger in 3 seconds. Lock your phone or leave the screen on to verify the sound and alert.",
-        [{ text: "OK" }]
-      );
-      // Wait 4 seconds and refresh count
-      setTimeout(() => {
-        refreshStatus();
-      }, 4000);
-    } catch {
-      Alert.alert("Error", "Failed to schedule test reminder.");
-    } finally {
-      setIsSendingTest(false);
-    }
-  };
-
-  const handleReconcile = async () => {
-    setIsReconciling(true);
-    try {
-      const schedulesRes = await getSchedules();
-      const result: ReconciliationResult = await notificationService.reconcileAllSchedules(
-        schedulesRes.items || []
-      );
-      Alert.alert(
-        "Reminders Synchronized",
-        `Sync complete:\n• Active Reminders: ${result.activeCount}\n• Newly Scheduled: ${result.scheduledCount}\n• Orphaned Cancelled: ${result.cancelledCount}`,
-        [{ text: "OK" }]
-      );
-      setScheduledCount(result.activeCount);
-    } catch {
-      Alert.alert("Sync Error", "Failed to synchronize schedules with device notifications.");
-    } finally {
-      setIsReconciling(false);
-      refreshStatus();
+      refreshStatus(false);
     }
   };
 
@@ -126,12 +103,13 @@ export const NotificationStatusCard: React.FC = () => {
         <View style={styles.headerTitleContainer}>
           <Text style={styles.cardTitle}>🔔 Medication Reminders & Alerts</Text>
           <Text style={styles.cardSubtitle}>
-            Local device alarms via Android High-Importance channel
+            Local device alarms via Android
           </Text>
         </View>
         <TouchableOpacity
-          onPress={refreshStatus}
+          onPress={() => refreshStatus(true)}
           style={styles.refreshBadge}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           accessibilityLabel="Refresh reminder status"
         >
           <Text style={styles.refreshBadgeText}>↻</Text>
@@ -171,10 +149,31 @@ export const NotificationStatusCard: React.FC = () => {
             <Text style={styles.countValue}>{scheduledCount} scheduled</Text>
           </View>
 
-          {/* Android Channel Info */}
+          {/* Reminder Status: Communicates automatic sync status */}
           <View style={styles.statusRow}>
-            <Text style={styles.label}>Android Channel:</Text>
-            <Text style={styles.channelValue}>medication-reminders (Urgent / Max)</Text>
+            <Text style={styles.label}>Reminder Status:</Text>
+            <View style={styles.statusValueContainer}>
+              <Text
+                style={[
+                  styles.statusValueText,
+                  syncStatus.statusLabel === "disabled"
+                    ? styles.statusMuted
+                    : !isGranted
+                    ? styles.statusWarning
+                    : styles.statusSuccess,
+                ]}
+              >
+                {syncStatus.isSyncing
+                  ? "↻ Synchronizing..."
+                  : syncStatus.statusLabel === "disabled"
+                  ? "Paused in Settings"
+                  : !isGranted
+                  ? "⚠️ Permission Required"
+                  : syncStatus.statusLabel === "offline"
+                  ? "✓ Offline (Reminders Saved)"
+                  : "✓ Automatically synchronized"}
+              </Text>
+            </View>
           </View>
 
           {/* In-app warning if permission is missing */}
@@ -200,24 +199,6 @@ export const NotificationStatusCard: React.FC = () => {
               </View>
             </View>
           )}
-
-          {/* Action Buttons: Test Reminder & Sync */}
-          <View style={styles.actionButtonRow}>
-            <Button
-              title={isSendingTest ? "Scheduling..." : "Test Alert (3s)"}
-              onPress={handleSendTestReminder}
-              variant="outline"
-              loading={isSendingTest}
-              style={styles.actionButton}
-            />
-            <Button
-              title={isReconciling ? "Syncing..." : "Sync Reminders"}
-              onPress={handleReconcile}
-              variant="secondary"
-              loading={isReconciling}
-              style={styles.actionButton}
-            />
-          </View>
 
           {/* Medical Safety Disclaimer */}
           <View style={styles.disclaimerContainer}>
@@ -299,9 +280,21 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.primaryDark,
   },
-  channelValue: {
+  statusValueContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statusValueText: {
     ...typography.caption,
-    fontWeight: "600",
+    fontWeight: "700",
+  },
+  statusSuccess: {
+    color: colors.taken,
+  },
+  statusWarning: {
+    color: colors.warning,
+  },
+  statusMuted: {
     color: colors.textMuted,
   },
   badge: {
@@ -353,14 +346,6 @@ const styles = StyleSheet.create({
   warningButton: {
     flex: 1,
     minHeight: 38,
-  },
-  actionButtonRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  actionButton: {
-    flex: 1,
   },
   disclaimerContainer: {
     marginTop: spacing.md,

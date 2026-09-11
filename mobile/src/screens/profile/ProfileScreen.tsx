@@ -86,6 +86,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
     }
   }, [isCaregiver]);
 
+  const [isSendingTest, setIsSendingTest] = useState<boolean>(false);
+
   // Handle Medication Reminder Toggle (Functional integration)
   const handleToggleReminders = async (newValue: boolean) => {
     setIsTogglingReminder(true);
@@ -106,14 +108,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
 
       if (!newValue) {
         // Disabled: cancel all pending device reminder notifications
-        await notificationService.cancelAllNotifications();
+        await notificationService.autoSync({ force: true, remindersEnabled: false });
         setSuccessMessage("Medication reminder alarms paused. Existing schedules remain saved.");
       } else {
         // Enabled: reconcile active schedules with notification service
-        const schedRes = await getSchedules();
-        if (schedRes?.items) {
-          await notificationService.reconcileAllSchedules(schedRes.items);
-        }
+        await notificationService.autoSync({ force: true, remindersEnabled: true });
         setSuccessMessage("Medication reminder alarms enabled and synchronized.");
       }
 
@@ -122,6 +121,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
       setErrorMessage(err.message || "Could not update notification setting.");
     } finally {
       setIsTogglingReminder(false);
+    }
+  };
+
+  const handleSendTestAlert = async () => {
+    setIsSendingTest(true);
+    try {
+      await notificationService.sendTestReminder();
+      Alert.alert(
+        "Test Alarm Scheduled",
+        "A test notification will trigger in 3 seconds. Lock your phone or leave the screen on to verify the sound and alert.",
+        [{ text: "OK" }]
+      );
+    } catch {
+      Alert.alert("Error", "Failed to schedule test reminder.");
+    } finally {
+      setIsSendingTest(false);
     }
   };
 
@@ -354,6 +369,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
                     accessibilityLabel="Toggle medication reminder alarms"
                   />
                 )}
+              </View>
+            )}
+
+            {/* QA & Verification: Immediate Test Alarm */}
+            {!isCaregiver && remindersEnabled && (
+              <View style={styles.testAlertRow}>
+                <Button
+                  title={isSendingTest ? "Scheduling Test..." : "🔔 Test Alarm Alert (3s)"}
+                  onPress={handleSendTestAlert}
+                  variant="outline"
+                  loading={isSendingTest}
+                  style={styles.testAlertButton}
+                />
               </View>
             )}
 
@@ -628,6 +656,14 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.textSecondary,
     lineHeight: 16,
+  },
+  testAlertRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  testAlertButton: {
+    minHeight: 38,
   },
   securityRow: {
     paddingVertical: spacing.sm,

@@ -97,6 +97,7 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
       setSchedules((prev) => prev.map((s) => (s.id === sched.id ? updated : s)));
       try {
         await notificationService.syncScheduleReminder(updated);
+        await notificationService.autoSync({ force: true });
       } catch (notifErr) {
         console.warn("Failed to sync reminder status:", notifErr);
       }
@@ -117,6 +118,7 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
             setSchedules((prev) => prev.filter((s) => s.id !== sched.id));
             try {
               await notificationService.cancelScheduleReminder(sched.id);
+              await notificationService.autoSync({ force: true });
             } catch (notifErr) {
               console.warn("Failed to cancel schedule reminder:", notifErr);
             }
@@ -145,6 +147,7 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
       for (const s of schedules) {
         notificationService.cancelScheduleReminder(s.id).catch(() => {});
       }
+      await notificationService.autoSync({ force: true }).catch(() => {});
       Alert.alert("Deleted", `"${currentMed.name}" has been removed from your list.`, [
         { text: "OK", onPress: onDeleted },
       ]);
