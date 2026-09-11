@@ -92,6 +92,14 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
     if (data.scheduledTime && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(data.scheduledTime)) {
       return data.scheduledTime;
     }
+    if (data.scheduledTime) {
+      const parsed = new Date(data.scheduledTime);
+      if (!isNaN(parsed.getTime())) {
+        const hh = String(parsed.getHours()).padStart(2, "0");
+        const mm = String(parsed.getMinutes()).padStart(2, "0");
+        return `${hh}:${mm}`;
+      }
+    }
     const d = new Date();
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
@@ -297,7 +305,7 @@ export const DoseAlarmModal: React.FC<DoseAlarmModalProps> = ({
 
                 <View style={styles.timeRow}>
                   <Text style={styles.timeLabel}>Scheduled Time:</Text>
-                  <Text style={styles.timeValue}>{data.scheduledTime}</Text>
+                  <Text style={styles.timeValue}>{getValidScheduledTime()}</Text>
                 </View>
 
                 <Text style={styles.promptText}>

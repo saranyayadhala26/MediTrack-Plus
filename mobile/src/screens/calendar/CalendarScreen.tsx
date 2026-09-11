@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -574,7 +575,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   scrollContent: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.lg,
     paddingBottom: spacing.huge * 2,
   },
   header: {

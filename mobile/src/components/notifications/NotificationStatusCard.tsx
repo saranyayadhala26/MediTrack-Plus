@@ -174,7 +174,7 @@ export const NotificationStatusCard: React.FC = () => {
           {/* Android Channel Info */}
           <View style={styles.statusRow}>
             <Text style={styles.label}>Android Channel:</Text>
-            <Text style={styles.channelValue}>medication-reminders (High)</Text>
+            <Text style={styles.channelValue}>medication-reminders (Urgent / Max)</Text>
           </View>
 
           {/* In-app warning if permission is missing */}

@@ -202,6 +202,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack }) => {
         <TouchableOpacity
           style={styles.backButton}
           onPress={onBack}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel="Back to previous screen"
         >
@@ -435,6 +436,8 @@ const styles = StyleSheet.create({
   },
   backButton: {
     alignSelf: "flex-start",
+    minHeight: 36,
+    justifyContent: "center",
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
     backgroundColor: "rgba(255, 255, 255, 0.2)",

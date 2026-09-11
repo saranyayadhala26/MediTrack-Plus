@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   FlatList,
+  Platform,
   RefreshControl,
   SafeAreaView,
   StatusBar,
@@ -168,6 +169,7 @@ export const MedicineListScreen: React.FC<MedicineListScreenProps> = ({
             onPress={onAddMedicine}
             variant="secondary"
             style={styles.addButton}
+            textStyle={styles.addButtonText}
           />
         )}
       </View>
@@ -228,7 +230,11 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.lg,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.lg,
+    paddingBottom: spacing.lg,
     paddingHorizontal: spacing.lg,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -248,8 +254,16 @@ const styles = StyleSheet.create({
   },
   addButton: {
     paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    minHeight: 38,
     minWidth: 120,
     backgroundColor: colors.surface,
+    borderRadius: borderRadius.full,
+  },
+  addButtonText: {
+    ...typography.caption,
+    color: colors.primaryDark,
+    fontWeight: "700",
   },
   caregiverNotice: {
     backgroundColor: colors.secondaryLight,

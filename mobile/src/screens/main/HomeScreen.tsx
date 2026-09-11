@@ -4,6 +4,7 @@
 
 import React from "react";
 import {
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -165,17 +166,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </View>
         </Card>
 
-        {/* Phase Status Card */}
+        {/* Prescription Safety & Privacy Card */}
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Phase 4 Medicine Management Active</Text>
+          <Text style={styles.cardTitle}>Prescription Safety & Privacy</Text>
           <Text style={styles.cardDescription}>
-            Full CRUD operations, patient isolation, and supply tracking are verified and active.
+            MediTrack+ keeps your daily schedule secure, synchronized, and private.
           </Text>
           <View style={styles.bulletList}>
-            <Text style={styles.bulletItem}>✓ Full Medicine CRUD operational</Text>
-            <Text style={styles.bulletItem}>✓ Strict patient data isolation enforced</Text>
-            <Text style={styles.bulletItem}>✓ Low supply & refill threshold alerts active</Text>
-            <Text style={styles.bulletItem}>✓ Medical safety disclaimers embedded</Text>
+            <Text style={styles.bulletItem}>✓ Strict personal data privacy & isolation</Text>
+            <Text style={styles.bulletItem}>✓ Automated low supply & refill alerts</Text>
+            <Text style={styles.bulletItem}>✓ High-priority intake alarm reminders</Text>
+            <Text style={styles.bulletItem}>✓ Verified clinical tracking & adherence logs</Text>
           </View>
         </Card>
 
@@ -198,7 +199,11 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.xl,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.xl,
+    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     borderBottomLeftRadius: borderRadius.lg,
     borderBottomRightRadius: borderRadius.lg,

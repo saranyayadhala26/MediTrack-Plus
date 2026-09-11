@@ -431,7 +431,7 @@ export const MainAppNavigator: React.FC = () => {
                   activeTab === "dashboard" ? styles.tabIconActive : styles.tabIconInactive,
                 ]}
               >
-                ⌂
+                🏠
               </Text>
               <Text
                 style={[

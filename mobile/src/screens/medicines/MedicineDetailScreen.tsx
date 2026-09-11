@@ -8,6 +8,7 @@ import React, { useEffect, useState } from "react";
 import {
   Alert,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -172,6 +173,7 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
         <TouchableOpacity
           onPress={onBack}
           style={styles.backButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           accessibilityRole="button"
           accessibilityLabel="Back to medicines"
         >
@@ -522,14 +524,20 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingTop: (StatusBar.currentHeight || 0) + spacing.xs,
-    paddingBottom: spacing.sm,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.md,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   backButton: {
+    minHeight: 44,
+    minWidth: 60,
+    justifyContent: "center",
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
   },

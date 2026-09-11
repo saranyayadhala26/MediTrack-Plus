@@ -8,6 +8,7 @@
 import React, { useState } from "react";
 import {
   Alert,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -372,7 +373,11 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.md,
+    paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",

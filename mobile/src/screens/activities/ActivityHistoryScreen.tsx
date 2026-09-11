@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.lg,
-    paddingTop: (StatusBar.currentHeight || 0) + spacing.md,
+    paddingTop: (StatusBar.currentHeight || 24) + spacing.md,
     paddingBottom: spacing.md,
   },
   headerTitle: {
@@ -422,8 +422,8 @@ const styles = StyleSheet.create({
   },
   snoozeContextText: {
     ...typography.small,
-    color: colors.primaryDark,
-    fontStyle: "italic",
+    color: "#92400E",
+    fontWeight: "600",
   },
   skipReasonBox: {
     backgroundColor: colors.skippedLight,

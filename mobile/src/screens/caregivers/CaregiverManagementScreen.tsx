@@ -317,8 +317,14 @@ export const CaregiverManagementScreen: React.FC<CaregiverManagementScreenProps>
         <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
         <View style={styles.header}>
           {onBack && (
-            <TouchableOpacity onPress={onBack} style={styles.backButton}>
-              <Text style={styles.backButtonText}>‹ Back</Text>
+            <TouchableOpacity
+              onPress={onBack}
+              style={styles.backButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Text style={styles.backButtonText}>← Back</Text>
             </TouchableOpacity>
           )}
           <Text style={styles.headerTitle}>Caregiver Management</Text>
@@ -339,19 +345,18 @@ export const CaregiverManagementScreen: React.FC<CaregiverManagementScreenProps>
 
       {/* Screen Header */}
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          {onBack && (
-            <TouchableOpacity
-              onPress={onBack}
-              style={styles.backButton}
-              accessibilityRole="button"
-              accessibilityLabel="Back"
-            >
-              <Text style={styles.backButtonText}>‹ Back</Text>
-            </TouchableOpacity>
-          )}
-          <Text style={styles.headerTitle}>Caregivers</Text>
-        </View>
+        {onBack && (
+          <TouchableOpacity
+            onPress={onBack}
+            style={styles.backButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+          >
+            <Text style={styles.backButtonText}>← Back</Text>
+          </TouchableOpacity>
+        )}
+        <Text style={styles.headerTitle}>Caregivers</Text>
         <Text style={styles.headerSubtitle}>
           Manage trusted family & caregivers who monitor your adherence
         </Text>
@@ -584,24 +589,26 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop:
+      Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24) + spacing.md
+        : spacing.md,
     paddingBottom: spacing.lg,
     borderBottomLeftRadius: borderRadius.lg,
     borderBottomRightRadius: borderRadius.lg,
   },
-  headerTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.xs,
-  },
   backButton: {
-    paddingVertical: spacing.xs,
-    paddingRight: spacing.md,
-    minHeight: accessibility.minTouchTarget,
+    alignSelf: "flex-start",
+    minHeight: 36,
     justifyContent: "center",
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.sm,
   },
   backButtonText: {
-    ...typography.h3,
+    ...typography.body,
     color: colors.textInverse,
     fontWeight: "700",
   },
