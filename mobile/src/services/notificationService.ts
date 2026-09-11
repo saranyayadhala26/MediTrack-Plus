@@ -12,7 +12,7 @@ import { MedicationSchedule } from "../types";
 export const MEDICATION_CHANNEL_ID = "medication-reminders";
 export const MEDICATION_CHANNEL_NAME = "Medication Reminders";
 
-// Configure foreground presentation: Show banner, play sound, alert user
+// Configure foreground presentation: Show banner, play sound, alert user with high priority
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -20,6 +20,7 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    priority: Notifications.AndroidNotificationPriority.MAX,
   }),
 });
 
@@ -41,6 +42,7 @@ class NotificationService {
 
   /**
    * Initialize notification channels and settings.
+   * Upgraded in Phase 10.2 to MAX importance, Alarm audio stream, and public lockscreen visibility.
    * Safe to call multiple times.
    */
   async initialize(): Promise<void> {
@@ -50,13 +52,23 @@ class NotificationService {
       if (Platform.OS === "android") {
         await Notifications.setNotificationChannelAsync(MEDICATION_CHANNEL_ID, {
           name: MEDICATION_CHANNEL_NAME,
-          importance: Notifications.AndroidImportance.HIGH,
+          importance: Notifications.AndroidImportance.MAX,
           sound: "default",
-          vibrationPattern: [0, 250, 250, 250],
+          audioAttributes: {
+            usage: Notifications.AndroidAudioUsage.ALARM,
+            contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+            flags: {
+              enforceAudibility: true,
+              requestHardwareAudioVideoSynchronization: false,
+            },
+          },
+          vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
           enableLights: true,
           enableVibrate: true,
           lightColor: "#0D9488",
-          description: "Crucial local alerts for prescribed medication intake times.",
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          bypassDnd: true,
+          description: "Crucial local alarms and reminders for prescribed medication intake times.",
         });
       }
       this.isInitialized = true;
@@ -162,8 +174,10 @@ class NotificationService {
       medicineId: schedule.medicineId,
       medicineName,
       dosage: schedule.dosage || "",
+      dosageUnit: schedule.dosageUnit || "",
       time: schedule.time,
       frequencyType: schedule.frequencyType,
+      isAlarm: true,
     };
 
     const scheduledIds: string[] = [];
@@ -375,13 +389,28 @@ class NotificationService {
    */
   async sendTestReminder(): Promise<string> {
     await this.initialize();
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    const currentTimeStr = `${hh}:${mm}`;
+
     return await Notifications.scheduleNotificationAsync({
       identifier: `meditrack-test-${Date.now()}`,
       content: {
-        title: "MediTrack+ Test Reminder",
-        body: "Local alerts and notifications are configured and functioning properly!",
+        title: "MediTrack+ Medication Alarm",
+        body: "Test Alarm: Time to take your scheduled medication (1 tablet).",
         sound: "default",
-        data: { type: "test", timestamp: new Date().toISOString() },
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        data: {
+          type: "test",
+          isAlarm: true,
+          medicineId: "test-med-001",
+          scheduleId: "test-sched-001",
+          medicineName: "Test Medication",
+          dosage: "1 tablet",
+          time: currentTimeStr,
+          timestamp: new Date().toISOString(),
+        },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
@@ -394,7 +423,7 @@ class NotificationService {
 
   /**
    * Schedule a hardware local snooze reminder for a medication dose in N minutes (default 10m).
-   * Generates a non-repeating alert on the high-importance medication channel.
+   * Generates a non-repeating alert on the max-importance medication alarm channel.
    */
   async scheduleSnoozeReminder(
     medicineName: string,
@@ -411,13 +440,14 @@ class NotificationService {
         title: `⏰ Snoozed Dose: ${medicineName}`,
         body: `It is time to take your snoozed dose of ${medicineName}${dosageInfo ? ` (${dosageInfo})` : ""}.`,
         sound: "default",
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+        priority: Notifications.AndroidNotificationPriority.MAX,
         data: {
           scheduleId,
           medicineId,
           medicineName,
           dosage: dosageInfo,
           isSnooze: true,
+          isAlarm: true,
           scheduledTime: new Date(Date.now() + snoozeMinutes * 60 * 1000).toISOString(),
         },
       },
@@ -450,6 +480,16 @@ class NotificationService {
     callback: (response: Notifications.NotificationResponse) => void
   ): Notifications.EventSubscription {
     return Notifications.addNotificationResponseReceivedListener(callback);
+  }
+
+  /**
+   * Attach listener for notification received events (while app is in foreground).
+   * Invokes the callback when a notification arrives so the app can present the alarm modal immediately.
+   */
+  addNotificationReceivedListener(
+    callback: (notification: Notifications.Notification) => void
+  ): Notifications.EventSubscription {
+    return Notifications.addNotificationReceivedListener(callback);
   }
 }
 

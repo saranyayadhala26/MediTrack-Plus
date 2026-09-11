@@ -29,6 +29,7 @@ import { CaregiverDashboardScreen } from "../screens/caregivers/CaregiverDashboa
 import { PatientMonitoringDetailScreen } from "../screens/caregivers/PatientMonitoringDetailScreen";
 import { CaregiverAlertsScreen } from "../screens/caregivers/CaregiverAlertsScreen";
 import { ProfileScreen } from "../screens/profile/ProfileScreen";
+import { DoseAlarmModal, DoseAlarmData } from "../components/activities/DoseAlarmModal";
 import { notificationService } from "../services/notificationService";
 import { LinkedPatient, MedicationSchedule, Medicine } from "../types";
 import { useAuth } from "../context/AuthContext";
@@ -59,6 +60,9 @@ export const MainAppNavigator: React.FC = () => {
   // Profile navigation state (Phase 10.1)
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
+  // Medication Alarm state (Phase 10.2)
+  const [alarmData, setAlarmData] = useState<DoseAlarmData | null>(null);
+
   // Setup notification channel, sync active schedules, and attach tap listener
   useEffect(() => {
     if (isCaregiver) return;
@@ -77,10 +81,48 @@ export const MainAppNavigator: React.FC = () => {
         console.warn("MainAppNavigator: Error reconciling notifications on launch:", err);
       });
 
-    // Deep link navigation on notification tap
-    const subscription = notificationService.addNotificationResponseListener((response) => {
+    // 1. Foreground notification receipt: show DoseAlarmModal immediately (Phase 10.2)
+    const receivedSub = notificationService.addNotificationReceivedListener((notification) => {
+      if (!isMounted) return;
+      const data = (notification?.request?.content?.data as any) || {};
+      if (data?.isAlarm || (data?.medicineId && data?.scheduleId)) {
+        const todayStr = (data.scheduledDate as string) || new Date().toISOString().split("T")[0];
+        setAlarmData({
+          scheduleId: (data.scheduleId as string) || "test-sched-001",
+          medicineId: (data.medicineId as string) || "test-med-001",
+          medicineName: (data.medicineName as string) || "Prescribed Medicine",
+          dosage: (data.dosage as string) || "",
+          dosageUnit: (data.dosageUnit as string) || "",
+          scheduledTime:
+            (data.time as string) ||
+            (data.scheduledTime as string) ||
+            new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          scheduledDate: todayStr,
+          isSnooze: Boolean(data.isSnooze),
+        });
+      }
+    });
+
+    // 2. Notification response (tap): show DoseAlarmModal or deep link to MedicineDetail
+    const responseSub = notificationService.addNotificationResponseListener((response) => {
+      if (!isMounted) return;
       const data = (response?.notification?.request?.content?.data as any) || {};
-      if (data?.medicineId) {
+      if (data?.isAlarm || (data?.medicineId && data?.scheduleId)) {
+        const todayStr = (data.scheduledDate as string) || new Date().toISOString().split("T")[0];
+        setAlarmData({
+          scheduleId: (data.scheduleId as string) || "test-sched-001",
+          medicineId: (data.medicineId as string) || "test-med-001",
+          medicineName: (data.medicineName as string) || "Prescribed Medicine",
+          dosage: (data.dosage as string) || "",
+          dosageUnit: (data.dosageUnit as string) || "",
+          scheduledTime:
+            (data.time as string) ||
+            (data.scheduledTime as string) ||
+            new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          scheduledDate: todayStr,
+          isSnooze: Boolean(data.isSnooze),
+        });
+      } else if (data?.medicineId) {
         getMedicineById(data.medicineId)
           .then((med) => {
             if (isMounted && med) {
@@ -100,7 +142,8 @@ export const MainAppNavigator: React.FC = () => {
 
     return () => {
       isMounted = false;
-      subscription.remove();
+      receivedSub.remove();
+      responseSub.remove();
     };
   }, []);
 
@@ -505,6 +548,16 @@ export const MainAppNavigator: React.FC = () => {
           </View>
         )
       )}
+
+      {/* Prominent Medication Alarm Modal (Phase 10.2) */}
+      <DoseAlarmModal
+        visible={!!alarmData}
+        data={alarmData}
+        onDismiss={() => setAlarmData(null)}
+        onActivityRecorded={(_action) => {
+          setAlarmData(null);
+        }}
+      />
     </SafeAreaView>
   );
 };
