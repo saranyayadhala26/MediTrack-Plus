@@ -8,6 +8,7 @@ Generates professional, printable, and clinically structured adherence reports u
 """
 
 import io
+import os
 from typing import List, Optional
 
 from reportlab.lib import colors
@@ -16,6 +17,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
+    Image as RLImage,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -234,10 +236,28 @@ class PdfService:
             ("TOPPADDING", (0, 0), (-1, -1), 4),
         ]))
 
+        # Check for brand logo asset
+        logo_path = os.path.join(os.path.dirname(__file__), "..", "assets", "logo.png")
+        if os.path.isfile(logo_path):
+            logo_img = RLImage(logo_path, width=28, height=28)
+            title_cell = Table(
+                [[logo_img, Paragraph("MediTrack+", style_title)]],
+                colWidths=[34, 326],
+            )
+            title_cell.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]))
+        else:
+            title_cell = Paragraph("MediTrack+", style_title)
+
         header_table = Table(
             [
                 [
-                    Paragraph("MediTrack+", style_title),
+                    title_cell,
                     badge_table,
                 ],
                 [

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Business Rules
     CAREGIVER_MISSED_THRESHOLD: int = 2  # Repeated missed dose alert threshold
 
-    # Email & Alerts Configuration (Phase 11)
+    # Email & Alerts Configuration (Phase 11 & 12.3)
     EMAIL_BACKEND: str = "mock"  # "smtp" or "mock"
     EMAIL_ENABLED: bool = True
     SMTP_HOST: str = "localhost"
@@ -36,11 +36,27 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    SMTP_TIMEOUT: int = 15
     EMAIL_FROM_EMAIL: str = "noreply@meditrack.health"
     EMAIL_FROM_NAME: str = "MediTrack+ Medication Safety"
 
     # Automation Security: Defaults to None; fails closed if unset
     CRON_SECRET_KEY: Optional[str] = None
+
+    # Password Recovery & Abuse Protection (Phase 12.1)
+    RESET_TOKEN_EXPIRE_MINUTES: int = 15
+    RESET_TOKEN_MAX_ATTEMPTS: int = 5
+    RESET_RATE_LIMIT_PER_HOUR: int = 3
+    RESET_TOKEN_PEPPER: Optional[str] = None
+
+    def get_reset_token_pepper(self) -> str:
+        """Return server-side pepper for HMAC-SHA256 OTP hashing."""
+        if self.RESET_TOKEN_PEPPER:
+            return self.RESET_TOKEN_PEPPER
+        if self.ENVIRONMENT == "production":
+            raise ValueError("RESET_TOKEN_PEPPER must be explicitly configured in production.")
+        return "dev_reset_token_pepper_secret_key_2026"
 
     # Medical Safety Notice
     MEDICAL_DISCLAIMER: str = (

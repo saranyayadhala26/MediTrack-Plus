@@ -140,6 +140,8 @@ class SMTPEmailService(EmailServiceInterface):
         smtp_username: Optional[str] = None,
         smtp_password: Optional[str] = None,
         smtp_use_tls: Optional[bool] = None,
+        smtp_use_ssl: Optional[bool] = None,
+        smtp_timeout: Optional[int] = None,
         from_email: Optional[str] = None,
         from_name: Optional[str] = None,
         email_enabled: Optional[bool] = None,
@@ -149,6 +151,8 @@ class SMTPEmailService(EmailServiceInterface):
         self.smtp_username = (settings.SMTP_USERNAME if smtp_username is None else smtp_username).strip()
         self.smtp_password = settings.SMTP_PASSWORD if smtp_password is None else smtp_password
         self.smtp_use_tls = settings.SMTP_USE_TLS if smtp_use_tls is None else smtp_use_tls
+        self.smtp_use_ssl = settings.SMTP_USE_SSL if smtp_use_ssl is None else smtp_use_ssl
+        self.smtp_timeout = settings.SMTP_TIMEOUT if smtp_timeout is None else smtp_timeout
         self.from_email = (settings.EMAIL_FROM_EMAIL if from_email is None else from_email).strip()
         self.from_name = (settings.EMAIL_FROM_NAME if from_name is None else from_name).strip()
         self.email_enabled = settings.EMAIL_ENABLED if email_enabled is None else email_enabled
@@ -191,7 +195,7 @@ class SMTPEmailService(EmailServiceInterface):
         return sanitized
 
     async def send_email(self, message: EmailMessage) -> EmailResult:
-        """Send an email over SMTP. Handles TLS, authentication, and safe error masking."""
+        """Send an email over SMTP. Handles TLS/SSL, authentication, and safe error masking."""
         if not self.email_enabled:
             logger.info("SMTPEmailService: Delivery skipped (EMAIL_ENABLED=false) for %s", message.recipient)
             return EmailResult(
@@ -207,10 +211,16 @@ class SMTPEmailService(EmailServiceInterface):
             raise EmailConfigurationError(err_msg)
 
         mime_msg = self.build_mime_message(message)
+        use_direct_ssl = self.smtp_use_ssl or (self.smtp_port == 465 and self.smtp_use_ssl is not False)
 
         try:
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as smtp:
-                if self.smtp_use_tls:
+            if use_direct_ssl:
+                smtp_client = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
+            else:
+                smtp_client = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
+
+            with smtp_client as smtp:
+                if not use_direct_ssl and self.smtp_use_tls:
                     smtp.starttls()
                 if self.smtp_username and self.smtp_password:
                     smtp.login(self.smtp_username, self.smtp_password)
@@ -237,11 +247,17 @@ class SMTPEmailService(EmailServiceInterface):
 # Service Factory
 # ============================================================================
 
+_shared_mock_email_service: Optional[MockEmailService] = None
+
+
 def get_email_service() -> EmailServiceInterface:
     """Provide the configured email service provider based on application settings."""
+    global _shared_mock_email_service
     if settings.EMAIL_BACKEND == "smtp":
         return SMTPEmailService()
-    return MockEmailService()
+    if _shared_mock_email_service is None:
+        _shared_mock_email_service = MockEmailService()
+    return _shared_mock_email_service
 
 
 # Shared singleton instance for default application use

@@ -13,6 +13,7 @@ COLLECTION_ACTIVITIES = "medication_activities"
 COLLECTION_CAREGIVERS = "caregivers"
 COLLECTION_NOTIFICATIONS = "notifications"
 COLLECTION_SCHEDULED_REPORT_DELIVERIES = "scheduled_report_deliveries"
+COLLECTION_RATE_LIMITS = "rate_limits"
 
 
 def now_utc() -> datetime:
@@ -45,6 +46,11 @@ def create_user_document(
         "emergencyContact": emergency_contact.strip() if emergency_contact else None,
         "healthConditions": health_conditions or [],
         "notificationPreferences": {**default_prefs, **(notification_preferences or {})},
+        "tokenVersion": 0,
+        "passwordResetOtpHash": None,
+        "passwordResetExpiresAt": None,
+        "passwordResetAttempts": 0,
+        "passwordResetRequestedAt": None,
         "createdAt": now_utc(),
         "updatedAt": now_utc(),
     }

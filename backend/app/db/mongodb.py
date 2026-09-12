@@ -17,6 +17,7 @@ from app.models.collections import (
     COLLECTION_CAREGIVERS,
     COLLECTION_NOTIFICATIONS,
     COLLECTION_SCHEDULED_REPORT_DELIVERIES,
+    COLLECTION_RATE_LIMITS,
 )
 
 logger = logging.getLogger("meditrack.db")
@@ -133,6 +134,12 @@ async def setup_indexes():
             unique=True,
         )
 
+        # Rate limits collection: TTL index on expiresAt for automatic background cleanup
+        await db_manager.db[COLLECTION_RATE_LIMITS].create_index(
+            [("expiresAt", pymongo.ASCENDING)],
+            expireAfterSeconds=0,
+        )
+
         logger.info("MongoDB indexes verified successfully with PyMongo Async API.")
     except Exception as e:
         logger.warning("Error creating MongoDB indexes: %s", str(e))
@@ -184,4 +191,8 @@ def get_notifications_collection() -> AsyncCollection:
 
 def get_scheduled_report_deliveries_collection() -> AsyncCollection:
     return get_database()[COLLECTION_SCHEDULED_REPORT_DELIVERIES]
+
+
+def get_rate_limits_collection() -> AsyncCollection:
+    return get_database()[COLLECTION_RATE_LIMITS]
 

@@ -295,3 +295,198 @@ Medical Disclaimer:
         attachment_filename=filename,
         attachment_mime_type="application/pdf",
     )
+
+
+# ============================================================================
+# Template C: Password Reset OTP Email (Phase 12.1)
+# ============================================================================
+
+def create_password_reset_email(
+    recipient_email: str,
+    recipient_name: Optional[str],
+    otp_code: str,
+    expire_minutes: int = 15,
+) -> EmailMessage:
+    """Construct a secure, branded password reset email containing the 6-digit verification code."""
+    name_display = recipient_name.strip() if recipient_name and recipient_name.strip() else "Valued User"
+    subject = f"[MediTrack+] Your Password Reset Code is {otp_code}"
+
+    text_body = f"""MediTrack+ Password Reset Request
+
+Dear {name_display},
+
+We received a request to reset the password for your MediTrack+ account ({recipient_email}).
+
+Your 6-digit verification code is:
+{otp_code}
+
+This code will expire in {expire_minutes} minutes.
+
+Security Notice:
+- Never share this code with anyone. MediTrack+ staff will never ask you for your verification code.
+- If you did not initiate this password reset request, please disregard this email. Your current password remains secure.
+
+Medical Safety Notice:
+MediTrack+ is a medication reminder and tracking platform. It does not provide medical advice, diagnosis, or treatment decisions.
+
+— MediTrack+ Healthcare Platform Security Team
+"""
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 24px 12px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); border: 1px solid #e2e8f0;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background-color: #008080; padding: 20px 24px; text-align: left;">
+                            <h1 style="margin: 0; font-size: 20px; color: #ffffff; font-weight: 700;">MediTrack+</h1>
+                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #ccfbf1;">Account Security &amp; Password Recovery</p>
+                        </td>
+                    </tr>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 24px;">
+                            <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.5;">Dear <strong>{name_display}</strong>,</p>
+                            <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.5; color: #334155;">
+                                We received a request to reset the password for your MediTrack+ account. Please enter the following 6-digit verification code in the application:
+                            </p>
+                            <!-- Verification Code Card -->
+                            <div style="background-color: #f0fdfa; border: 2px solid #008080; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 24px;">
+                                <div style="font-size: 12px; font-weight: 700; color: #008080; letter-spacing: 1px; margin-bottom: 8px;">VERIFICATION CODE</div>
+                                <div style="font-size: 32px; font-weight: 800; color: #0f172a; letter-spacing: 6px; font-family: monospace;">{otp_code}</div>
+                                <div style="font-size: 12px; color: #64748b; margin-top: 8px;">Expires in <strong>{expire_minutes} minutes</strong></div>
+                            </div>
+                            <!-- Security Alert Box -->
+                            <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px;">
+                                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #92400e;">Security Notice</p>
+                                <p style="margin: 4px 0 0 0; font-size: 12px; color: #78350f; line-height: 1.4;">
+                                    Do not share this code with anyone. MediTrack+ staff will never ask for your password or verification code. If you did not request this, your account remains secure and no action is required.
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 16px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; line-height: 1.4; color: #64748b;">
+                            <p style="margin: 0 0 6px 0;"><strong>Medical Safety Notice:</strong> MediTrack+ is a medication management tool. It does not provide medical diagnoses or treatment recommendations.</p>
+                            <p style="margin: 0; color: #94a3b8;">&copy; MediTrack+ Healthcare Platform. Automated security notification.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+    return EmailMessage(
+        recipient=recipient_email,
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+    )
+
+
+# ============================================================================
+# Template D: Password Changed Notification Email (Phase 12.1)
+# ============================================================================
+
+def create_password_changed_notification_email(
+    recipient_email: str,
+    recipient_name: Optional[str],
+    changed_at_str: Optional[str] = None,
+) -> EmailMessage:
+    """Construct a security notice email alerting the user that their password was recently changed."""
+    name_display = recipient_name.strip() if recipient_name and recipient_name.strip() else "Valued User"
+    time_display = changed_at_str or "Just now"
+    subject = "[MediTrack+] Security Alert: Your Password Was Changed"
+
+    text_body = f"""MediTrack+ Security Notice: Password Changed
+
+Dear {name_display},
+
+This is an automated confirmation that the password for your MediTrack+ account ({recipient_email}) was successfully changed on {time_display} UTC.
+
+All prior active sessions and devices have been logged out for your security.
+
+Security Warning:
+If you initiated this change, no further action is required.
+If you did NOT change your password, please contact our security team immediately or reset your password using the MediTrack+ application.
+
+Medical Safety Notice:
+MediTrack+ is a medication reminder and tracking platform. It does not provide medical advice or treatment decisions.
+
+— MediTrack+ Healthcare Platform Security Team
+"""
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 24px 12px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); border: 1px solid #e2e8f0;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background-color: #008080; padding: 20px 24px; text-align: left;">
+                            <h1 style="margin: 0; font-size: 20px; color: #ffffff; font-weight: 700;">MediTrack+</h1>
+                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #ccfbf1;">Security Notification</p>
+                        </td>
+                    </tr>
+                    <!-- Alert Notice Banner -->
+                    <tr>
+                        <td style="padding: 20px 24px 8px 24px;">
+                            <div style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 4px;">
+                                <p style="margin: 0; font-weight: 600; color: #065f46; font-size: 14px;">Password Updated Successfully</p>
+                                <p style="margin: 4px 0 0 0; font-size: 13px; color: #047857;">Your account password was updated. All previous sessions have been invalidated.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 12px 24px 24px 24px;">
+                            <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.5;">Dear <strong>{name_display}</strong>,</p>
+                            <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #334155;">
+                                The password for your MediTrack+ account (<strong>{recipient_email}</strong>) was successfully changed on <strong>{time_display}</strong> UTC.
+                            </p>
+                            <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px;">
+                                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #991b1b;">Didn't make this change?</p>
+                                <p style="margin: 4px 0 0 0; font-size: 12px; color: #7f1d1d; line-height: 1.4;">
+                                    If you did not initiate this change, your account may have been compromised. Please immediately use the <strong>Forgot Password</strong> option in the MediTrack+ mobile app to secure your account.
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 16px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; line-height: 1.4; color: #64748b;">
+                            <p style="margin: 0 0 6px 0;"><strong>Medical Safety Notice:</strong> MediTrack+ is a medication reminder and adherence platform.</p>
+                            <p style="margin: 0; color: #94a3b8;">&copy; MediTrack+ Healthcare Platform. Automated security notification.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+    return EmailMessage(
+        recipient=recipient_email,
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+    )

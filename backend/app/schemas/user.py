@@ -119,6 +119,27 @@ class PasswordChange(BaseModel):
         return self
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(..., description="Registered account email address", examples=["user@example.com"])
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str = Field(..., description="Status message acknowledging the recovery request")
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr = Field(..., description="Registered account email address", examples=["user@example.com"])
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$", description="6-digit numeric verification code", examples=["123456"])
+    newPassword: str = Field(..., min_length=8, max_length=128, description="New password (minimum 8 characters)")
+    confirmNewPassword: str = Field(..., min_length=8, max_length=128, description="Password confirmation")
+
+    @model_validator(mode="after")
+    def verify_reset_passwords(self) -> "ResetPasswordRequest":
+        if self.newPassword != self.confirmNewPassword:
+            raise ValueError("New passwords do not match.")
+        return self
+
+
 class UserResponse(BaseModel):
     id: str = Field(..., description="User unique ObjectId string")
     email: EmailStr

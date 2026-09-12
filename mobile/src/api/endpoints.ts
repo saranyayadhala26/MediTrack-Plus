@@ -13,6 +13,8 @@ export const ENDPOINTS = {
     PROFILE: "/auth/me",
     UPDATE_PROFILE: "/auth/profile",
     CHANGE_PASSWORD: "/auth/password",
+    FORGOT_PASSWORD: "/auth/forgot-password",
+    RESET_PASSWORD: "/auth/reset-password",
   },
 
   // Medicines

@@ -62,6 +62,16 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Validate tokenVersion for session invalidation (defaults to 0 for backwards compatibility)
+    token_version = payload.get("token_version", 0)
+    current_token_version = user_doc.get("tokenVersion", 0)
+    if token_version != current_token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has expired or was invalidated. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return document_to_dict(user_doc)
 
 

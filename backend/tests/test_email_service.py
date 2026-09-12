@@ -514,3 +514,89 @@ def test_get_email_service_factory():
     with patch("app.core.config.settings.EMAIL_BACKEND", "smtp"):
         svc_smtp = get_email_service()
         assert isinstance(svc_smtp, SMTPEmailService)
+
+
+# ============================================================================
+# Test T: SMTP Port 465 and Direct SSL Behavior (Phase 12.3)
+# ============================================================================
+@pytest.mark.asyncio
+async def test_smtp_port_465_uses_direct_ssl():
+    """Verify that port 465 or smtp_use_ssl=True invokes smtplib.SMTP_SSL without starttls."""
+    smtp_svc = SMTPEmailService(
+        smtp_host="smtp.example.com",
+        smtp_port=465,
+        smtp_username="ssl_user",
+        smtp_password="ssl_password",
+        smtp_use_ssl=True,
+        smtp_timeout=20,
+    )
+    msg = EmailMessage(
+        recipient="ssl_dest@example.com",
+        subject="SSL Test",
+        text_body="SSL Body",
+    )
+
+    mock_ssl_instance = MagicMock()
+    mock_ssl_instance.__enter__.return_value = mock_ssl_instance
+
+    with patch("smtplib.SMTP_SSL", return_value=mock_ssl_instance) as mock_ssl_cls, \
+         patch("smtplib.SMTP") as mock_smtp_cls:
+        res = await smtp_svc.send_email(msg)
+
+        assert res.success is True
+        mock_ssl_cls.assert_called_once_with("smtp.example.com", 465, timeout=20)
+        mock_smtp_cls.assert_not_called()
+        # Direct SSL must not issue starttls
+        mock_ssl_instance.starttls.assert_not_called()
+        mock_ssl_instance.login.assert_called_once_with("ssl_user", "ssl_password")
+        mock_ssl_instance.send_message.assert_called_once()
+
+
+# ============================================================================
+# Test U: SMTP Port 587 STARTTLS and Configurable Timeout (Phase 12.3)
+# ============================================================================
+@pytest.mark.asyncio
+async def test_smtp_port_587_starttls_and_configurable_timeout():
+    """Verify that port 587 invokes smtplib.SMTP with starttls and respects custom timeout."""
+    custom_timeout = 25
+    smtp_svc = SMTPEmailService(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="tls_user",
+        smtp_password="tls_password",
+        smtp_use_tls=True,
+        smtp_use_ssl=False,
+        smtp_timeout=custom_timeout,
+    )
+    msg = EmailMessage(
+        recipient="tls_dest@example.com",
+        subject="TLS 587 Test",
+        text_body="TLS Body",
+    )
+
+    mock_smtp_instance = MagicMock()
+    mock_smtp_instance.__enter__.return_value = mock_smtp_instance
+
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance) as mock_smtp_cls, \
+         patch("smtplib.SMTP_SSL") as mock_ssl_cls:
+        res = await smtp_svc.send_email(msg)
+
+        assert res.success is True
+        mock_smtp_cls.assert_called_once_with("smtp.example.com", 587, timeout=custom_timeout)
+        mock_ssl_cls.assert_not_called()
+        mock_smtp_instance.starttls.assert_called_once()
+        mock_smtp_instance.login.assert_called_once_with("tls_user", "tls_password")
+        mock_smtp_instance.send_message.assert_called_once()
+
+
+# ============================================================================
+# Test V: SMTP Diagnostic Script Executes Cleanly in Mock Mode (Phase 12.3)
+# ============================================================================
+def test_smtp_diagnostic_utility_mock_mode():
+    """Verify backend/scripts/test_smtp_connection.py runs safely and returns code 0."""
+    from scripts.test_smtp_connection import run_smtp_verification
+
+    with patch("app.core.config.settings.EMAIL_BACKEND", "mock"):
+        exit_code = run_smtp_verification()
+        assert exit_code == 0
+

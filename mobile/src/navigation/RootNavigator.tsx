@@ -9,13 +9,18 @@ import { SafeAreaView, StyleSheet, View } from "react-native";
 import { LoadingState } from "../components/common/LoadingState";
 import { colors } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
+import { ForgotPasswordScreen } from "../screens/auth/ForgotPasswordScreen";
 import { LoginScreen } from "../screens/auth/LoginScreen";
 import { RegisterScreen } from "../screens/auth/RegisterScreen";
+import { ResetPasswordScreen } from "../screens/auth/ResetPasswordScreen";
 import { MainAppNavigator } from "./MainAppNavigator";
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<
+    "login" | "register" | "forgot-password" | "reset-password"
+  >("login");
+  const [recoveryEmail, setRecoveryEmail] = useState<string>("");
 
   if (isLoading) {
     return (
@@ -28,10 +33,30 @@ export const RootNavigator: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <View style={styles.container}>
-        {authMode === "login" ? (
-          <LoginScreen onNavigateToRegister={() => setAuthMode("register")} />
-        ) : (
+        {authMode === "login" && (
+          <LoginScreen
+            onNavigateToRegister={() => setAuthMode("register")}
+            onNavigateToForgotPassword={() => setAuthMode("forgot-password")}
+          />
+        )}
+        {authMode === "register" && (
           <RegisterScreen onNavigateToLogin={() => setAuthMode("login")} />
+        )}
+        {authMode === "forgot-password" && (
+          <ForgotPasswordScreen
+            onNavigateToLogin={() => setAuthMode("login")}
+            onCodeSent={(email) => {
+              setRecoveryEmail(email);
+              setAuthMode("reset-password");
+            }}
+          />
+        )}
+        {authMode === "reset-password" && (
+          <ResetPasswordScreen
+            initialEmail={recoveryEmail}
+            onNavigateToLogin={() => setAuthMode("login")}
+            onNavigateToForgotPassword={() => setAuthMode("forgot-password")}
+          />
         )}
       </View>
     );
