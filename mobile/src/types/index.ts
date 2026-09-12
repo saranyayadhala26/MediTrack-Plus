@@ -287,4 +287,70 @@ export interface CaregiverNotificationAlert {
   createdAt: string;
 }
 
+// ============================================================================
+// Phase 11: Medication Adherence Report Types
+// ============================================================================
 
+export type ReportPeriodType = "weekly" | "monthly";
+
+export interface ReportSummary {
+  totalScheduled: number;
+  takenCount: number;
+  skippedCount: number;
+  missedCount: number;
+  unresolvedSnoozedCount: number;
+  pendingCount: number;
+  adherencePercentage: number;
+  hasScheduledDoses: boolean;
+}
+
+export interface ReportStreakSummary {
+  currentStreak: number;
+  longestStreak: number;
+  totalAdherentDays: number;
+  totalTrackedDays: number;
+  lastAdherentDate?: string | null;
+  evaluatedDate: string;
+}
+
+export interface ReportMedicineBreakdown {
+  medicineId: string;
+  medicineName: string;
+  dosage: string;
+  dosageUnit: string;
+  totalScheduled: number;
+  takenCount: number;
+  skippedCount: number;
+  missedCount: number;
+  unresolvedSnoozedCount: number;
+  pendingCount: number;
+  adherencePercentage: number;
+  hasScheduledDoses: boolean;
+}
+
+export interface ReportDailySummary {
+  date: string;
+  totalScheduled: number;
+  takenCount: number;
+  skippedCount: number;
+  missedCount: number;
+  unresolvedSnoozedCount: number;
+  pendingCount: number;
+  adherencePercentage: number;
+  hasScheduledDoses: boolean;
+}
+
+export interface MedicationReportResponse {
+  reportType: ReportPeriodType;
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  patientId: string;
+  patientName: string;
+  patientEmail: string;
+  summary: ReportSummary;
+  streak: ReportStreakSummary;
+  medicines: ReportMedicineBreakdown[];
+  dailySummaries: ReportDailySummary[];
+  medicalDisclaimer: string;
+}

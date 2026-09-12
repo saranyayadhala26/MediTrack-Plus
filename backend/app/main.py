@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.mongodb import connect_to_mongo, close_mongo_connection
-from app.routers import activities, auth, calendar, caregivers, health, medicines, notifications, schedules
+from app.routers import activities, auth, calendar, caregivers, health, medicines, notifications, reports, schedules
 
 # Setup logging
 logging.basicConfig(
@@ -71,4 +71,5 @@ app.include_router(notifications.router, prefix=f"{settings.API_V1_PREFIX}/notif
 app.include_router(activities.router, prefix=f"{settings.API_V1_PREFIX}/medication-activities")
 app.include_router(calendar.router, prefix=f"{settings.API_V1_PREFIX}/medication-calendar")
 app.include_router(caregivers.router, prefix=f"{settings.API_V1_PREFIX}/caregivers")
+app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports")
 

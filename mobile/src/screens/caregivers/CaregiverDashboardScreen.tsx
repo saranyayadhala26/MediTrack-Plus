@@ -30,12 +30,14 @@ interface CaregiverDashboardScreenProps {
   onSelectPatient: (patient: LinkedPatient) => void;
   onViewAlerts: () => void;
   onNavigateToProfile?: () => void;
+  onNavigateToReports?: (patient?: LinkedPatient) => void;
 }
 
 export const CaregiverDashboardScreen: React.FC<CaregiverDashboardScreenProps> = ({
   onSelectPatient,
   onViewAlerts,
   onNavigateToProfile,
+  onNavigateToReports,
 }) => {
   const { user, logout } = useAuth();
   const [patients, setPatients] = useState<LinkedPatient[]>([]);
@@ -292,12 +294,20 @@ export const CaregiverDashboardScreen: React.FC<CaregiverDashboardScreenProps> =
                   </View>
                 </View>
 
-                <Button
-                  title="View Monitoring Dashboard →"
-                  onPress={() => onSelectPatient(patient)}
-                  variant="primary"
-                  style={styles.viewPatientBtn}
-                />
+                <View style={styles.patientActionRow}>
+                  <Button
+                    title="Monitoring →"
+                    onPress={() => onSelectPatient(patient)}
+                    variant="primary"
+                    style={styles.actionBtnHalf}
+                  />
+                  <Button
+                    title="📊 Reports"
+                    onPress={() => onNavigateToReports?.(patient)}
+                    variant="outline"
+                    style={styles.actionBtnHalf}
+                  />
+                </View>
               </Card>
             ))}
           </View>
@@ -650,5 +660,13 @@ const styles = StyleSheet.create({
   },
   viewPatientBtn: {
     marginTop: spacing.xs,
+  },
+  patientActionRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  actionBtnHalf: {
+    flex: 1,
   },
 });

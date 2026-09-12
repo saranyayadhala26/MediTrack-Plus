@@ -30,6 +30,7 @@ interface PatientMonitoringDetailScreenProps {
   relationship: string;
   onBack: () => void;
   onViewAlerts: () => void;
+  onViewReports?: () => void;
 }
 
 export const PatientMonitoringDetailScreen: React.FC<PatientMonitoringDetailScreenProps> = ({
@@ -38,6 +39,7 @@ export const PatientMonitoringDetailScreen: React.FC<PatientMonitoringDetailScre
   relationship,
   onBack,
   onViewAlerts,
+  onViewReports,
 }) => {
   const [summary, setSummary] = useState<CaregiverMonitoringSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -265,6 +267,20 @@ export const PatientMonitoringDetailScreen: React.FC<PatientMonitoringDetailScre
                   </Text>
                 </View>
               </View>
+            </Card>
+
+            {/* Phase 11: Clinical Adherence Reports Card */}
+            <Card style={styles.todayCard}>
+              <Text style={styles.cardHeaderTitle}>📊 Adherence Reports</Text>
+              <Text style={styles.cardSubTitle}>
+                Generate weekly and monthly medication adherence reports and download clinical PDFs for {patientName}.
+              </Text>
+              <Button
+                title="📊 View Adherence Reports"
+                onPress={() => onViewReports?.()}
+                variant="primary"
+                style={{ marginTop: spacing.md }}
+              />
             </Card>
 
             {/* Recent Caregiver Alerts for this Patient */}

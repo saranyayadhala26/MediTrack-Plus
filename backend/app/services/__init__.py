@@ -29,6 +29,45 @@ from app.services.caregiver_alert_service import (
     CaregiverAlertService,
     build_fingerprint,
 )
+from app.services.adherence_service import (
+    build_calendar_response,
+    build_streak_response,
+)
+from app.services.report_service import (
+    PatientNotFoundError,
+    ReportService,
+    ReportValidationError,
+    calculate_medication_report,
+    validate_report_period,
+)
+from app.services.pdf_service import (
+    PdfService,
+    generate_adherence_report_pdf,
+)
+from app.services.email_service import (
+    EmailConfigurationError,
+    EmailDeliveryError,
+    EmailMessage,
+    EmailResult,
+    EmailServiceError,
+    EmailServiceInterface,
+    MockEmailService,
+    SMTPEmailService,
+    get_email_service,
+)
+from app.services.email_templates import (
+    create_adherence_report_email,
+    create_caregiver_missed_dose_email,
+)
+from app.services.scheduled_report_service import (
+    DeliveryResult,
+    ScheduledReportService,
+    ScheduledRunSummary,
+    build_delivery_key,
+    calculate_completed_period,
+    get_completed_monthly_period,
+    get_completed_weekly_period,
+)
 
 __all__ = [
     "DATE_REGEX",
@@ -52,5 +91,34 @@ __all__ = [
     "AlertPersistenceResult",
     "CaregiverAlertService",
     "build_fingerprint",
+    # Phase 11 Services
+    "build_calendar_response",
+    "build_streak_response",
+    "ReportService",
+    "ReportValidationError",
+    "PatientNotFoundError",
+    "calculate_medication_report",
+    "validate_report_period",
+    "PdfService",
+    "generate_adherence_report_pdf",
+    "EmailMessage",
+    "EmailResult",
+    "EmailServiceError",
+    "EmailConfigurationError",
+    "EmailDeliveryError",
+    "EmailServiceInterface",
+    "MockEmailService",
+    "SMTPEmailService",
+    "get_email_service",
+    "create_caregiver_missed_dose_email",
+    "create_adherence_report_email",
+    "ScheduledReportService",
+    "DeliveryResult",
+    "ScheduledRunSummary",
+    "build_delivery_key",
+    "calculate_completed_period",
+    "get_completed_weekly_period",
+    "get_completed_monthly_period",
 ]
+
 

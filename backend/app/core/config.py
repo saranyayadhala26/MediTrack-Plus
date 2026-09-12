@@ -1,7 +1,7 @@
 """Application configuration module using Pydantic Settings."""
 
 import os
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,6 +27,20 @@ class Settings(BaseSettings):
 
     # Business Rules
     CAREGIVER_MISSED_THRESHOLD: int = 2  # Repeated missed dose alert threshold
+
+    # Email & Alerts Configuration (Phase 11)
+    EMAIL_BACKEND: str = "mock"  # "smtp" or "mock"
+    EMAIL_ENABLED: bool = True
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM_EMAIL: str = "noreply@meditrack.health"
+    EMAIL_FROM_NAME: str = "MediTrack+ Medication Safety"
+
+    # Automation Security: Defaults to None; fails closed if unset
+    CRON_SECRET_KEY: Optional[str] = None
 
     # Medical Safety Notice
     MEDICAL_DISCLAIMER: str = (

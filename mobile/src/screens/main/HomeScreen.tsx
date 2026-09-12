@@ -24,12 +24,14 @@ interface HomeScreenProps {
   onNavigateToMedicines?: (subScreen?: "list" | "add") => void;
   onNavigateToCaregivers?: () => void;
   onNavigateToProfile?: () => void;
+  onNavigateToReports?: () => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onNavigateToMedicines,
   onNavigateToCaregivers,
   onNavigateToProfile,
+  onNavigateToReports,
 }) => {
   const { user, logout, refreshProfile } = useAuth();
 
@@ -110,6 +112,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Phase 6: Local Medication Reminders & Alerts */}
         <NotificationStatusCard />
+
+        {/* Phase 11: Medication Adherence Reports */}
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>📊 Adherence Reports</Text>
+          <Text style={styles.cardDescription}>
+            {isCaregiver
+              ? "View weekly and monthly adherence reports and download clinical PDFs for monitored patients."
+              : "Review weekly and monthly medication adherence summaries, track streaks, and download clinical PDFs."}
+          </Text>
+          <Button
+            title="📊 View Adherence Reports"
+            onPress={() => onNavigateToReports?.()}
+            variant="primary"
+            style={styles.reportsButton}
+          />
+        </Card>
 
         {/* Phase 9.2.6: Caregiver Access & Monitoring Card */}
         {!isCaregiver && (
@@ -354,5 +372,8 @@ const styles = StyleSheet.create({
   },
   caregiverButton: {
     marginTop: spacing.xs,
+  },
+  reportsButton: {
+    marginTop: spacing.sm,
   },
 });

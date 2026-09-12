@@ -63,4 +63,16 @@ export const ENDPOINTS = {
     BASE: "/notifications",
     MARK_READ: (id: string) => `/notifications/${id}/read`,
   },
+
+  // Reports (Phase 11)
+  REPORTS: {
+    WEEKLY: "/reports/weekly",
+    MONTHLY: "/reports/monthly",
+    WEEKLY_PDF: "/reports/weekly/pdf",
+    MONTHLY_PDF: "/reports/monthly/pdf",
+    PATIENT_WEEKLY: (patientId: string) => `/reports/patients/${patientId}/weekly`,
+    PATIENT_MONTHLY: (patientId: string) => `/reports/patients/${patientId}/monthly`,
+    PATIENT_WEEKLY_PDF: (patientId: string) => `/reports/patients/${patientId}/weekly/pdf`,
+    PATIENT_MONTHLY_PDF: (patientId: string) => `/reports/patients/${patientId}/monthly/pdf`,
+  },
 };

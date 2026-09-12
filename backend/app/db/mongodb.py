@@ -16,6 +16,7 @@ from app.models.collections import (
     COLLECTION_ACTIVITIES,
     COLLECTION_CAREGIVERS,
     COLLECTION_NOTIFICATIONS,
+    COLLECTION_SCHEDULED_REPORT_DELIVERIES,
 )
 
 logger = logging.getLogger("meditrack.db")
@@ -126,6 +127,12 @@ async def setup_indexes():
             partialFilterExpression={"fingerprint": {"$type": "string"}},
         )
 
+        # Scheduled report deliveries: unique index on deliveryKey for atomic claiming
+        await db_manager.db[COLLECTION_SCHEDULED_REPORT_DELIVERIES].create_index(
+            [("deliveryKey", pymongo.ASCENDING)],
+            unique=True,
+        )
+
         logger.info("MongoDB indexes verified successfully with PyMongo Async API.")
     except Exception as e:
         logger.warning("Error creating MongoDB indexes: %s", str(e))
@@ -173,3 +180,8 @@ def get_caregivers_collection() -> AsyncCollection:
 
 def get_notifications_collection() -> AsyncCollection:
     return get_database()[COLLECTION_NOTIFICATIONS]
+
+
+def get_scheduled_report_deliveries_collection() -> AsyncCollection:
+    return get_database()[COLLECTION_SCHEDULED_REPORT_DELIVERIES]
+

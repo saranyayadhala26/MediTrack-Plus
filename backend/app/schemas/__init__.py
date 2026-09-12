@@ -7,6 +7,8 @@ from app.schemas.common import (
 )
 from app.schemas.health import HealthResponse
 from app.schemas.user import (
+    NotificationPreferences,
+    NotificationPreferencesUpdate,
     TokenResponse,
     UserBase,
     UserLogin,
@@ -57,6 +59,15 @@ from app.schemas.notification import (
     NotificationStatus,
     NotificationType,
 )
+from app.schemas.report import (
+    MedicationReportResponse,
+    ReportDailySummary,
+    ReportDoseStatus,
+    ReportMedicineBreakdown,
+    ReportPeriod,
+    ReportStreakSummary,
+    ReportSummary,
+)
 
 __all__ = [
     # Common & Health
@@ -72,6 +83,8 @@ __all__ = [
     "UserUpdate",
     "UserResponse",
     "TokenResponse",
+    "NotificationPreferences",
+    "NotificationPreferencesUpdate",
     # Medicine
     "DosageUnit",
     "MedicineBase",
@@ -109,4 +122,13 @@ __all__ = [
     "NotificationCreate",
     "NotificationResponse",
     "NotificationListResponse",
+    # Report (Phase 11)
+    "ReportPeriod",
+    "ReportDoseStatus",
+    "ReportSummary",
+    "ReportStreakSummary",
+    "ReportMedicineBreakdown",
+    "ReportDailySummary",
+    "MedicationReportResponse",
 ]
+

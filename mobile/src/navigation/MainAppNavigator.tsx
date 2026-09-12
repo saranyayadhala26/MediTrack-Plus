@@ -30,6 +30,7 @@ import { CaregiverDashboardScreen } from "../screens/caregivers/CaregiverDashboa
 import { PatientMonitoringDetailScreen } from "../screens/caregivers/PatientMonitoringDetailScreen";
 import { CaregiverAlertsScreen } from "../screens/caregivers/CaregiverAlertsScreen";
 import { ProfileScreen } from "../screens/profile/ProfileScreen";
+import { ReportsScreen } from "../screens/reports/ReportsScreen";
 import { DoseAlarmModal, DoseAlarmData } from "../components/activities/DoseAlarmModal";
 import { notificationService } from "../services/notificationService";
 import { LinkedPatient, MedicationSchedule, Medicine } from "../types";
@@ -60,6 +61,10 @@ export const MainAppNavigator: React.FC = () => {
 
   // Profile navigation state (Phase 10.1)
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
+
+  // Reports navigation state (Phase 11 Step 9)
+  const [isReportsOpen, setIsReportsOpen] = useState<boolean>(false);
+  const [reportsPatientId, setReportsPatientId] = useState<string | undefined>(undefined);
 
   // Medication Alarm state (Phase 10.2)
   const [alarmData, setAlarmData] = useState<DoseAlarmData | null>(null);
@@ -164,6 +169,23 @@ export const MainAppNavigator: React.FC = () => {
       return <ProfileScreen onBack={() => setIsProfileOpen(false)} />;
     }
 
+    // Dedicated Adherence Reports Experience (Phase 11 Step 9)
+    if (isReportsOpen) {
+      return (
+        <ReportsScreen
+          initialPatientId={reportsPatientId}
+          onBack={() => {
+            setIsReportsOpen(false);
+            setReportsPatientId(undefined);
+          }}
+          onNavigateToProfile={() => {
+            setIsReportsOpen(false);
+            setIsProfileOpen(true);
+          }}
+        />
+      );
+    }
+
     // Caregiver Monitoring Experience (Phase 9.2.7)
     if (isCaregiver) {
       if (caregiverTab === "dashboard") {
@@ -175,6 +197,10 @@ export const MainAppNavigator: React.FC = () => {
               relationship={selectedPatient.relationship}
               onBack={() => setSelectedPatient(null)}
               onViewAlerts={() => setCaregiverTab("alerts")}
+              onViewReports={() => {
+                setReportsPatientId(selectedPatient.patientId);
+                setIsReportsOpen(true);
+              }}
             />
           );
         }
@@ -183,6 +209,10 @@ export const MainAppNavigator: React.FC = () => {
             onSelectPatient={(patient) => setSelectedPatient(patient)}
             onViewAlerts={() => setCaregiverTab("alerts")}
             onNavigateToProfile={() => setIsProfileOpen(true)}
+            onNavigateToReports={(patient) => {
+              setReportsPatientId(patient?.patientId);
+              setIsReportsOpen(true);
+            }}
           />
         );
       }
@@ -203,6 +233,10 @@ export const MainAppNavigator: React.FC = () => {
           onNavigateToMedicines={handleNavigateToMedicines}
           onNavigateToCaregivers={() => setActiveTab("caregivers")}
           onNavigateToProfile={() => setIsProfileOpen(true)}
+          onNavigateToReports={() => {
+            setReportsPatientId(undefined);
+            setIsReportsOpen(true);
+          }}
         />
       );
     }
@@ -333,8 +367,8 @@ export const MainAppNavigator: React.FC = () => {
     }
   };
 
-  // Hide bottom tab bar while user is actively filling out Add/Edit forms or viewing Profile
-  const showTabBar = isProfileOpen
+  // Hide bottom tab bar while user is actively filling out Add/Edit forms, viewing Profile, or viewing Reports
+  const showTabBar = isProfileOpen || isReportsOpen
     ? false
     : isCaregiver
     ? true

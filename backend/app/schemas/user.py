@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
@@ -16,6 +16,37 @@ class NotificationPreferences(BaseModel):
         default=True,
         description="Enable local medication reminder alarms",
     )
+    emailReportsEnabled: bool = Field(
+        default=False,
+        description="Enable scheduled weekly and monthly adherence summary reports via registered account email",
+    )
+    emailAlertsEnabled: bool = Field(
+        default=False,
+        description="Enable missed-dose alerts via registered account email (for caregivers)",
+    )
+
+    model_config = {
+        "extra": "forbid",
+    }
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    medicationRemindersEnabled: Optional[bool] = Field(
+        default=None,
+        description="Enable local medication reminder alarms",
+    )
+    emailReportsEnabled: Optional[bool] = Field(
+        default=None,
+        description="Enable scheduled weekly and monthly adherence summary reports via registered account email",
+    )
+    emailAlertsEnabled: Optional[bool] = Field(
+        default=None,
+        description="Enable missed-dose alerts via registered account email (for caregivers)",
+    )
+
+    model_config = {
+        "extra": "forbid",
+    }
 
 
 class UserBase(BaseModel):
@@ -26,6 +57,19 @@ class UserBase(BaseModel):
     emergencyContact: Optional[str] = Field(None, max_length=50, description="Emergency phone or contact info", examples=["+1-555-0199"])
     healthConditions: Optional[List[str]] = Field(default_factory=list, description="Optional recorded health conditions (e.g. Hypertension)")
     notificationPreferences: NotificationPreferences = Field(default_factory=NotificationPreferences, description="User notification preferences")
+
+    @field_validator("notificationPreferences", mode="before")
+    @classmethod
+    def ensure_notification_preferences(cls, v: Any) -> Any:
+        if v is None:
+            return NotificationPreferences()
+        if isinstance(v, dict):
+            return NotificationPreferences(
+                medicationRemindersEnabled=v.get("medicationRemindersEnabled", True),
+                emailReportsEnabled=v.get("emailReportsEnabled", False),
+                emailAlertsEnabled=v.get("emailAlertsEnabled", False),
+            )
+        return v
 
 
 class UserRegister(BaseModel):
@@ -54,7 +98,11 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=30)
     emergencyContact: Optional[str] = Field(None, max_length=50)
     healthConditions: Optional[List[str]] = Field(None, description="Updated health condition list")
-    notificationPreferences: Optional[NotificationPreferences] = Field(None, description="Updated notification preferences")
+    notificationPreferences: Optional[NotificationPreferencesUpdate] = Field(None, description="Updated notification preferences")
+
+    model_config = {
+        "extra": "forbid",
+    }
 
 
 class PasswordChange(BaseModel):
@@ -82,6 +130,19 @@ class UserResponse(BaseModel):
     notificationPreferences: NotificationPreferences = Field(default_factory=NotificationPreferences)
     createdAt: datetime
     updatedAt: datetime
+
+    @field_validator("notificationPreferences", mode="before")
+    @classmethod
+    def ensure_notification_preferences(cls, v: Any) -> Any:
+        if v is None:
+            return NotificationPreferences()
+        if isinstance(v, dict):
+            return NotificationPreferences(
+                medicationRemindersEnabled=v.get("medicationRemindersEnabled", True),
+                emailReportsEnabled=v.get("emailReportsEnabled", False),
+                emailAlertsEnabled=v.get("emailAlertsEnabled", False),
+            )
+        return v
 
     model_config = {
         "from_attributes": True,

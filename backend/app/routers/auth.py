@@ -159,7 +159,15 @@ async def update_profile(
         updates["healthConditions"] = payload.healthConditions
 
     if payload.notificationPreferences is not None:
-        updates["notificationPreferences"] = payload.notificationPreferences.model_dump()
+        existing_prefs = current_user.get("notificationPreferences") or {}
+        merged_prefs = {
+            "medicationRemindersEnabled": existing_prefs.get("medicationRemindersEnabled", True),
+            "emailReportsEnabled": existing_prefs.get("emailReportsEnabled", False),
+            "emailAlertsEnabled": existing_prefs.get("emailAlertsEnabled", False),
+        }
+        provided = payload.notificationPreferences.model_dump(exclude_unset=True)
+        merged_prefs.update(provided)
+        updates["notificationPreferences"] = merged_prefs
 
     if updates:
         updates["updatedAt"] = now_utc()

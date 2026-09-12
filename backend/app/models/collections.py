@@ -12,6 +12,7 @@ COLLECTION_SCHEDULES = "medication_schedules"
 COLLECTION_ACTIVITIES = "medication_activities"
 COLLECTION_CAREGIVERS = "caregivers"
 COLLECTION_NOTIFICATIONS = "notifications"
+COLLECTION_SCHEDULED_REPORT_DELIVERIES = "scheduled_report_deliveries"
 
 
 def now_utc() -> datetime:
@@ -29,7 +30,11 @@ def create_user_document(
     phone: Optional[str] = None,
     notification_preferences: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Factory creating a new persistent User document."""
+    default_prefs = {
+        "medicationRemindersEnabled": True,
+        "emailReportsEnabled": False,
+        "emailAlertsEnabled": False,
+    }
     return {
         "_id": ObjectId(),
         "email": email.strip().lower(),
@@ -39,7 +44,7 @@ def create_user_document(
         "phone": phone.strip() if phone else None,
         "emergencyContact": emergency_contact.strip() if emergency_contact else None,
         "healthConditions": health_conditions or [],
-        "notificationPreferences": notification_preferences or {"medicationRemindersEnabled": True},
+        "notificationPreferences": {**default_prefs, **(notification_preferences or {})},
         "createdAt": now_utc(),
         "updatedAt": now_utc(),
     }
@@ -194,4 +199,33 @@ def create_notification_document(
     if metadata is not None:
         doc["metadata"] = metadata
     return doc
+
+
+def create_scheduled_report_delivery_document(
+    delivery_key: str,
+    recipient_user_id: ObjectId,
+    patient_id: ObjectId,
+    period_type: str,
+    start_date: str,
+    end_date: str,
+    status: str = "pending",
+    attempts: int = 1,
+) -> Dict[str, Any]:
+    """Factory creating a new persistent ScheduledReportDelivery document (Phase 11)."""
+    return {
+        "_id": ObjectId(),
+        "deliveryKey": delivery_key.strip(),
+        "recipientUserId": recipient_user_id,
+        "patientId": patient_id,
+        "periodType": period_type.strip().lower(),
+        "startDate": start_date.strip(),
+        "endDate": end_date.strip(),
+        "status": status,
+        "attempts": attempts,
+        "createdAt": now_utc(),
+        "updatedAt": now_utc(),
+        "sentAt": None,
+        "errorMessage": None,
+    }
+
 
