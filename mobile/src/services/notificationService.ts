@@ -7,6 +7,7 @@
 
 import * as Notifications from "expo-notifications";
 import { Linking, Platform } from "react-native";
+import { canScheduleExactAlarms, openExactAlarmSettings } from "../../modules/exact-alarm";
 import { getSchedules } from "../api/schedules";
 import { MedicationSchedule } from "../types";
 
@@ -29,6 +30,7 @@ export interface NotificationPermissionState {
   status: Notifications.PermissionStatus;
   granted: boolean;
   canAskAgain: boolean;
+  exactAlarmGranted: boolean;
 }
 
 export interface ReconciliationResult {
@@ -65,32 +67,46 @@ class NotificationService {
    * Initialize notification channels and settings.
    * Upgraded in Phase 10.2 to MAX importance, Alarm audio stream, and public lockscreen visibility.
    * Safe to call multiple times.
+   * Removing nested flags avoids Android Expo Notifications 57 NullPointerException.
+   * Includes resilient fallback channel creation path.
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
     try {
       if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync(MEDICATION_CHANNEL_ID, {
-          name: MEDICATION_CHANNEL_NAME,
-          importance: Notifications.AndroidImportance.MAX,
-          sound: "default",
-          audioAttributes: {
-            usage: Notifications.AndroidAudioUsage.ALARM,
-            contentType: Notifications.AndroidAudioContentType.SONIFICATION,
-            flags: {
-              enforceAudibility: true,
-              requestHardwareAudioVideoSynchronization: false,
+        try {
+          await Notifications.setNotificationChannelAsync(MEDICATION_CHANNEL_ID, {
+            name: MEDICATION_CHANNEL_NAME,
+            importance: Notifications.AndroidImportance.MAX,
+            sound: "default",
+            audioAttributes: {
+              usage: Notifications.AndroidAudioUsage.ALARM,
+              contentType: Notifications.AndroidAudioContentType.SONIFICATION,
             },
-          },
-          vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
-          enableLights: true,
-          enableVibrate: true,
-          lightColor: "#0D9488",
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-          bypassDnd: true,
-          description: "Crucial local alarms and reminders for prescribed medication intake times.",
-        });
+            vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+            enableLights: true,
+            enableVibrate: true,
+            lightColor: "#0D9488",
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            bypassDnd: true,
+            description: "Crucial local alarms and reminders for prescribed medication intake times.",
+          });
+        } catch (channelError) {
+          console.warn("NotificationService: Primary channel setup failed, trying fallback channel config", channelError);
+          // Fallback resilient creation without custom audioAttributes to guarantee channel registration
+          await Notifications.setNotificationChannelAsync(MEDICATION_CHANNEL_ID, {
+            name: MEDICATION_CHANNEL_NAME,
+            importance: Notifications.AndroidImportance.MAX,
+            sound: "default",
+            vibrationPattern: [0, 500, 250, 500, 250, 500, 250, 500],
+            enableLights: true,
+            enableVibrate: true,
+            lightColor: "#0D9488",
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            description: "Crucial local alarms and reminders for prescribed medication intake times.",
+          });
+        }
       }
       this.isInitialized = true;
     } catch (error) {
@@ -99,15 +115,17 @@ class NotificationService {
   }
 
   /**
-   * Check current device notification permission status.
+   * Check current device notification permission status and exact alarm status.
    */
   async checkPermissions(): Promise<NotificationPermissionState> {
     try {
       const settings = await Notifications.getPermissionsAsync();
+      const exactAlarmGranted = canScheduleExactAlarms();
       return {
         status: settings.status,
         granted: settings.granted || settings.status === Notifications.PermissionStatus.GRANTED,
         canAskAgain: settings.canAskAgain,
+        exactAlarmGranted,
       };
     } catch (error) {
       console.warn("NotificationService: Error checking permissions", error);
@@ -115,6 +133,7 @@ class NotificationService {
         status: Notifications.PermissionStatus.UNDETERMINED,
         granted: false,
         canAskAgain: true,
+        exactAlarmGranted: canScheduleExactAlarms(),
       };
     }
   }
@@ -132,10 +151,12 @@ class NotificationService {
           allowSound: true,
         },
       });
+      const exactAlarmGranted = canScheduleExactAlarms();
       return {
         status: settings.status,
         granted: settings.granted || settings.status === Notifications.PermissionStatus.GRANTED,
         canAskAgain: settings.canAskAgain,
+        exactAlarmGranted,
       };
     } catch (error) {
       console.warn("NotificationService: Error requesting permissions", error);
@@ -143,7 +164,25 @@ class NotificationService {
         status: Notifications.PermissionStatus.DENIED,
         granted: false,
         canAskAgain: false,
+        exactAlarmGranted: canScheduleExactAlarms(),
       };
+    }
+  }
+
+  /**
+   * Check whether Android allows scheduling exact alarms (Android 12+ / API 31+).
+   */
+  canScheduleExactAlarms(): boolean {
+    return canScheduleExactAlarms();
+  }
+
+  /**
+   * Open Android's "Alarms & Reminders" special app access screen.
+   */
+  openExactAlarmSettings(): void {
+    const opened = openExactAlarmSettings();
+    if (!opened) {
+      this.openSystemSettings();
     }
   }
 

@@ -3,6 +3,7 @@
  */
 
 import React from "react";
+import { AdherenceSummaryCard } from "../../components/adherence/AdherenceSummaryCard";
 import {
   Platform,
   SafeAreaView,
@@ -109,6 +110,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             )}
           </View>
         </Card>
+
+        {!isCaregiver && <AdherenceSummaryCard />}
 
         {/* Phase 6: Local Medication Reminders & Alerts */}
         <NotificationStatusCard />

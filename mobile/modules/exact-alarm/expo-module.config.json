@@ -1,0 +1,7 @@
+{
+  "name": "exact-alarm",
+  "platforms": ["android"],
+  "android": {
+    "modules": ["com.meditrack.plus.alarm.ExactAlarmModule"]
+  }
+}

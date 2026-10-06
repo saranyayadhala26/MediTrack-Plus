@@ -26,9 +26,13 @@ import { UserRole } from "../../types";
 
 interface RegisterScreenProps {
   onNavigateToLogin: () => void;
+  onNavigateToVerifyEmail?: (email: string) => void;
 }
 
-export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToLogin }) => {
+export const RegisterScreen: React.FC<RegisterScreenProps> = ({
+  onNavigateToLogin,
+  onNavigateToVerifyEmail,
+}) => {
   const { register } = useAuth();
   const [fullName, setFullName] = useState<string>("");
   const [email, setEmail] = useState<string>("");
@@ -74,7 +78,11 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToLogi
     setLoading(false);
 
     if (result.success) {
-      onNavigateToLogin();
+      if (onNavigateToVerifyEmail) {
+        onNavigateToVerifyEmail(email.trim().toLowerCase());
+      } else {
+        onNavigateToLogin();
+      }
     } else if (result.error) {
       setError(result.error);
     }

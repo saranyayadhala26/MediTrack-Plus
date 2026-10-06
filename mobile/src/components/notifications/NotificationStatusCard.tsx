@@ -8,6 +8,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -143,6 +144,28 @@ export const NotificationStatusCard: React.FC = () => {
             </View>
           </View>
 
+          {/* Exact Alarm Permission Indicator (Android) */}
+          {Platform.OS === "android" && (
+            <View style={styles.statusRow}>
+              <Text style={styles.label}>Alarms & Reminders:</Text>
+              <View
+                style={[
+                  styles.badge,
+                  permission?.exactAlarmGranted ? styles.badgeSuccess : styles.badgeWarning,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.badgeText,
+                    permission?.exactAlarmGranted ? styles.badgeTextSuccess : styles.badgeTextWarning,
+                  ]}
+                >
+                  ● {permission?.exactAlarmGranted ? "Exact Alarms Allowed" : "Permission Needed"}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Active Local Reminders Count */}
           <View style={styles.statusRow}>
             <Text style={styles.label}>Active Device Reminders:</Text>
@@ -176,10 +199,10 @@ export const NotificationStatusCard: React.FC = () => {
             </View>
           </View>
 
-          {/* In-app warning if permission is missing */}
+          {/* In-app warning if notification permission is missing */}
           {!isGranted && (
             <View style={styles.warningBox}>
-              <Text style={styles.warningTitle}>⚠️ Action Needed for Alarms</Text>
+              <Text style={styles.warningTitle}>⚠️ Action Needed for Notifications</Text>
               <Text style={styles.warningText}>
                 Android requires notification permissions to sound intake alarms when the app is closed.
               </Text>
@@ -194,6 +217,24 @@ export const NotificationStatusCard: React.FC = () => {
                   title="Open Settings"
                   onPress={() => notificationService.openSystemSettings()}
                   variant="outline"
+                  style={styles.warningButton}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* In-app warning if Android exact-alarm permission is missing */}
+          {Platform.OS === "android" && isGranted && !permission?.exactAlarmGranted && (
+            <View style={styles.warningBox}>
+              <Text style={styles.warningTitle}>⚠️ Exact Alarm Permission Needed</Text>
+              <Text style={styles.warningText}>
+                On Android 12+, exact medication alarms require the "Alarms & Reminders" permission to trigger reliably at the scheduled time when the device is asleep.
+              </Text>
+              <View style={styles.warningActionRow}>
+                <Button
+                  title="Enable Alarms & Reminders"
+                  onPress={() => notificationService.openExactAlarmSettings()}
+                  variant="primary"
                   style={styles.warningButton}
                 />
               </View>

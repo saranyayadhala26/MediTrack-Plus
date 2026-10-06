@@ -3,8 +3,9 @@
  * MediTrack+ Smart Medication Management & Adherence
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -16,6 +17,7 @@ import {
   View,
 } from "react-native";
 import apiClient from "../../api/client";
+import { verifyResetOtp } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoints";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -37,14 +39,98 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
 }) => {
   const [email, setEmail] = useState<string>(initialEmail);
   const [code, setCode] = useState<string>("");
+  const [isCodeVerified, setIsCodeVerified] = useState<boolean>(false);
+  const [verifyingCode, setVerifyingCode] = useState<boolean>(false);
+  const [codeSuccessMsg, setCodeSuccessMsg] = useState<string | null>(null);
+
   const [newPassword, setNewPassword] = useState<string>("");
   const [confirmNewPassword, setConfirmNewPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [resending, setResending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
+  const [cooldown, setCooldown] = useState<number>(60);
+
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (cooldown > 0) {
+      timerRef.current = setTimeout(() => {
+        setCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [cooldown]);
+
+  const handleVerifyCode = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedCode = code.trim();
+
+    if (!trimmedEmail) {
+      setError("Please enter your email address.");
+      return;
+    }
+    if (!trimmedCode || trimmedCode.length !== 6 || !/^\d{6}$/.test(trimmedCode)) {
+      setError("Please enter the 6-digit numeric verification code.");
+      return;
+    }
+
+    setError(null);
+    setCodeSuccessMsg(null);
+    setVerifyingCode(true);
+
+    try {
+      const res = await verifyResetOtp(trimmedEmail, trimmedCode);
+      if (res.valid) {
+        setIsCodeVerified(true);
+        setCodeSuccessMsg("✓ Verification code verified. You can now set your new password.");
+      }
+    } catch (err: any) {
+      setIsCodeVerified(false);
+      const detail = err.response?.data?.detail;
+      if (typeof detail === "string") {
+        setError(detail);
+      } else if (!err.response) {
+        setError("Unable to connect to server. Please check your internet connection.");
+      } else {
+        setError("Invalid or expired reset code. Please check and try again.");
+      }
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setError("Please enter your email address to resend code.");
+      return;
+    }
+    if (cooldown > 0 || resending) return;
+
+    setError(null);
+    setResending(true);
+
+    try {
+      await apiClient.post(ENDPOINTS.AUTH.FORGOT_PASSWORD, {
+        email: trimmedEmail,
+      });
+      setCodeSuccessMsg("A new verification code has been dispatched to your email.");
+      setCooldown(60);
+      setCode("");
+      setIsCodeVerified(false);
+    } catch (err: any) {
+      setError("Failed to resend reset code. Please try again shortly.");
+    } finally {
+      setResending(false);
+    }
+  };
 
   const handleResetPassword = async () => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -71,6 +157,12 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     setLoading(true);
 
     try {
+      // Validate OTP first if not already validated
+      if (!isCodeVerified) {
+        await verifyResetOtp(trimmedEmail, trimmedCode);
+        setIsCodeVerified(true);
+      }
+
       await apiClient.post(ENDPOINTS.AUTH.RESET_PASSWORD, {
         email: trimmedEmail,
         code: trimmedCode,
@@ -79,7 +171,6 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       });
 
       setSuccess(true);
-      // Wait briefly so user sees the success state, then return to login
       setTimeout(() => {
         onNavigateToLogin();
       }, 1500);
@@ -183,6 +274,45 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
               autoCorrect={false}
               editable={!loading && !success}
             />
+
+            {/* Code Verification Feedback */}
+            {codeSuccessMsg ? (
+              <View style={styles.codeSuccessBox}>
+                <Text style={styles.codeSuccessText}>{codeSuccessMsg}</Text>
+              </View>
+            ) : null}
+
+            {/* Code Actions: Verify and Resend Cooldown */}
+            <View style={styles.codeActionRow}>
+              <TouchableOpacity
+                onPress={handleVerifyCode}
+                disabled={code.length !== 6 || verifyingCode || loading || isCodeVerified}
+                style={[
+                  styles.verifyCodeBtn,
+                  (code.length !== 6 || isCodeVerified) && styles.verifyCodeBtnDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Verify 6-digit code"
+              >
+                {verifyingCode ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.verifyCodeBtnText}>
+                    {isCodeVerified ? "✓ Code Verified" : "Verify Code"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              {cooldown > 0 ? (
+                <Text style={styles.cooldownText}>Resend in {cooldown}s</Text>
+              ) : (
+                <TouchableOpacity onPress={handleResendCode} disabled={resending}>
+                  <Text style={styles.resendCodeLink}>
+                    {resending ? "Sending..." : "Resend Code"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
             {/* New Password Field */}
             <View style={styles.passwordWrapper}>
@@ -448,5 +578,47 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontWeight: "700",
     color: colors.primaryDark,
+  },
+  codeSuccessBox: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+    borderRadius: borderRadius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  codeSuccessText: {
+    ...typography.caption,
+    color: "#15803D",
+    lineHeight: 18,
+  },
+  codeActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  verifyCodeBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.sm,
+  },
+  verifyCodeBtnDisabled: {
+    backgroundColor: colors.borderLight,
+  },
+  verifyCodeBtnText: {
+    ...typography.caption,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  cooldownText: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  resendCodeLink: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: "700",
   },
 });

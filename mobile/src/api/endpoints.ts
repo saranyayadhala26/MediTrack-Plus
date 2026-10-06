@@ -15,6 +15,9 @@ export const ENDPOINTS = {
     CHANGE_PASSWORD: "/auth/password",
     FORGOT_PASSWORD: "/auth/forgot-password",
     RESET_PASSWORD: "/auth/reset-password",
+    VERIFY_EMAIL: "/auth/verify-email-otp",
+    RESEND_VERIFICATION: "/auth/resend-verification-otp",
+    VERIFY_RESET_OTP: "/auth/verify-reset-otp",
   },
 
   // Medicines

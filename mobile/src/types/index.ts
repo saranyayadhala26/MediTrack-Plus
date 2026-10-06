@@ -17,8 +17,22 @@ export interface User {
   emergencyContact?: string;
   healthConditions?: string[];
   notificationPreferences?: NotificationPreferences;
+  isEmailVerified?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface VerifyEmailResponse {
+  message: string;
+  isEmailVerified: boolean;
+  access_token?: string;
+  token_type?: string;
+  user?: User;
+}
+
+export interface VerifyResetOtpResponse {
+  valid: boolean;
+  message: string;
 }
 
 export interface PasswordChangePayload {

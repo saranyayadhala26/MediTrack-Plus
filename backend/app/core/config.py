@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     RESET_RATE_LIMIT_PER_HOUR: int = 3
     RESET_TOKEN_PEPPER: Optional[str] = None
 
+    # Email Verification & Abuse Protection (Phase 13.1)
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = 10
+    EMAIL_VERIFICATION_MAX_ATTEMPTS: int = 5
+    EMAIL_VERIFICATION_COOLDOWN_SECONDS: int = 60
+    REQUIRE_VERIFIED_EMAIL_FOR_LOGIN: bool = False
+
     def get_reset_token_pepper(self) -> str:
         """Return server-side pepper for HMAC-SHA256 OTP hashing."""
         if self.RESET_TOKEN_PEPPER:

@@ -13,14 +13,16 @@ import { ForgotPasswordScreen } from "../screens/auth/ForgotPasswordScreen";
 import { LoginScreen } from "../screens/auth/LoginScreen";
 import { RegisterScreen } from "../screens/auth/RegisterScreen";
 import { ResetPasswordScreen } from "../screens/auth/ResetPasswordScreen";
+import { VerifyEmailScreen } from "../screens/auth/VerifyEmailScreen";
 import { MainAppNavigator } from "./MainAppNavigator";
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, setAuthSession } = useAuth();
   const [authMode, setAuthMode] = useState<
-    "login" | "register" | "forgot-password" | "reset-password"
+    "login" | "register" | "forgot-password" | "reset-password" | "verify-email"
   >("login");
   const [recoveryEmail, setRecoveryEmail] = useState<string>("");
+  const [verificationEmail, setVerificationEmail] = useState<string>("");
 
   if (isLoading) {
     return (
@@ -40,7 +42,26 @@ export const RootNavigator: React.FC = () => {
           />
         )}
         {authMode === "register" && (
-          <RegisterScreen onNavigateToLogin={() => setAuthMode("login")} />
+          <RegisterScreen
+            onNavigateToLogin={() => setAuthMode("login")}
+            onNavigateToVerifyEmail={(email) => {
+              setVerificationEmail(email);
+              setAuthMode("verify-email");
+            }}
+          />
+        )}
+        {authMode === "verify-email" && (
+          <VerifyEmailScreen
+            email={verificationEmail}
+            onVerificationSuccess={async (user, token) => {
+              if (token && user) {
+                await setAuthSession(token, user);
+              } else {
+                setAuthMode("login");
+              }
+            }}
+            onNavigateToLogin={() => setAuthMode("login")}
+          />
         )}
         {authMode === "forgot-password" && (
           <ForgotPasswordScreen

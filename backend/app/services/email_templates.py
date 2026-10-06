@@ -490,3 +490,100 @@ MediTrack+ is a medication reminder and tracking platform. It does not provide m
         text_body=text_body,
         html_body=html_body,
     )
+
+
+# ============================================================================
+# Template E: Email Verification OTP Email (Phase 13.1)
+# ============================================================================
+
+def create_email_verification_email(
+    recipient_email: str,
+    recipient_name: Optional[str],
+    otp_code: str,
+    expire_minutes: int = 10,
+) -> EmailMessage:
+    """Construct a secure, branded email containing the 6-digit email verification code."""
+    name_display = recipient_name.strip() if recipient_name and recipient_name.strip() else "Valued User"
+    subject = f"[MediTrack+] Verify Your Email — Code: {otp_code}"
+
+    text_body = f"""Welcome to MediTrack+!
+
+Dear {name_display},
+
+Thank you for registering with MediTrack+. Please verify your email address to activate all account features and receive medication alerts.
+
+Your 6-digit verification code is:
+{otp_code}
+
+This code will expire in {expire_minutes} minutes.
+
+Security Notice:
+- Never share this code with anyone. MediTrack+ staff will never ask for your verification code.
+- If you did not create a MediTrack+ account, please disregard this email.
+
+Medical Safety Notice:
+MediTrack+ is a medication management tool. It does not provide medical advice, diagnosis, or treatment recommendations.
+
+— MediTrack+ Healthcare Platform Team
+"""
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{subject}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 24px 12px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); border: 1px solid #e2e8f0;">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background-color: #008080; padding: 20px 24px; text-align: left;">
+                            <h1 style="margin: 0; font-size: 20px; color: #ffffff; font-weight: 700;">MediTrack+</h1>
+                            <p style="margin: 4px 0 0 0; font-size: 13px; color: #ccfbf1;">Account Registration &amp; Email Verification</p>
+                        </td>
+                    </tr>
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 24px;">
+                            <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.5;">Dear <strong>{name_display}</strong>,</p>
+                            <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.5; color: #334155;">
+                                Welcome to MediTrack+! Please enter the following 6-digit verification code in the application to complete your email verification:
+                            </p>
+                            <!-- Verification Code Card -->
+                            <div style="background-color: #f0fdfa; border: 2px solid #008080; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 24px;">
+                                <div style="font-size: 12px; font-weight: 700; color: #008080; letter-spacing: 1px; margin-bottom: 8px;">EMAIL VERIFICATION CODE</div>
+                                <div style="font-size: 32px; font-weight: 800; color: #0f172a; letter-spacing: 6px; font-family: monospace;">{otp_code}</div>
+                                <div style="font-size: 12px; color: #64748b; margin-top: 8px;">Expires in <strong>{expire_minutes} minutes</strong></div>
+                            </div>
+                            <div style="background-color: #f8fafc; border-left: 4px solid #008080; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px;">
+                                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #0f766e;">Why verify?</p>
+                                <p style="margin: 4px 0 0 0; font-size: 12px; color: #475569; line-height: 1.4;">
+                                    Verifying your email ensures you can recover your account securely and receive important medication safety alerts.
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 16px 24px; border-top: 1px solid #e2e8f0; font-size: 11px; line-height: 1.4; color: #64748b;">
+                            <p style="margin: 0 0 6px 0;"><strong>Medical Safety Notice:</strong> MediTrack+ is a medication reminder and adherence platform.</p>
+                            <p style="margin: 0; color: #94a3b8;">&copy; MediTrack+ Healthcare Platform. Automated registration notification.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+    return EmailMessage(
+        recipient=recipient_email,
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+    )

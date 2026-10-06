@@ -19,18 +19,28 @@ from app.core.security import (
 from app.db.mongodb import get_users_collection
 from app.models.collections import create_user_document, now_utc
 from app.schemas.user import (
+    EmergencyContactResponse,
+    EmergencyContactSchema,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    NotificationPreferences,
+    NotificationPreferencesUpdate,
     PasswordChange,
+    ResendVerificationOtpRequest,
     ResetPasswordRequest,
     TokenResponse,
     UserLogin,
     UserRegister,
     UserResponse,
     UserUpdate,
+    VerifyEmailRequest,
+    VerifyEmailResponse,
+    VerifyResetOtpRequest,
+    VerifyResetOtpResponse,
 )
 from app.services.email_service import get_email_service
 from app.services.email_templates import (
+    create_email_verification_email,
     create_password_changed_notification_email,
     create_password_reset_email,
 )
@@ -50,6 +60,7 @@ router = APIRouter(tags=["Authentication & Profile"])
 async def register(payload: UserRegister) -> TokenResponse:
     """
     Create a new user account with secure Bcrypt password hashing,
+    generate and dispatch an email verification OTP code,
     verify duplicate emails, and return a signed JWT access token.
     """
     email = payload.email.strip().lower()
@@ -77,8 +88,35 @@ async def register(payload: UserRegister) -> TokenResponse:
         health_conditions=[],
     )
 
+    # Generate 6-digit cryptographic verification OTP
+    otp = generate_reset_otp()
+    pepper = settings.get_reset_token_pepper()
+    otp_hash = hash_reset_otp(otp, pepper)
+    now = now_utc()
+    expires_at = now + timedelta(minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES)
+
+    user_doc["isEmailVerified"] = False
+    user_doc["emailVerificationOtpHash"] = otp_hash
+    user_doc["emailVerificationExpiresAt"] = expires_at
+    user_doc["emailVerificationAttempts"] = 0
+    user_doc["emailVerificationRequestedAt"] = now
+
     await users_coll.insert_one(user_doc)
     logger.info("New user registered successfully: %s (role: %s)", email, user_doc["role"])
+
+    # Dispatch email verification OTP asynchronously
+    try:
+        email_msg = create_email_verification_email(
+            recipient_email=email,
+            recipient_name=payload.fullName,
+            otp_code=otp,
+            expire_minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES,
+        )
+        svc = get_email_service()
+        await svc.send_email(email_msg)
+        logger.info("Email verification OTP dispatched to: %s", email)
+    except Exception as err:
+        logger.error("Failed to send email verification email to %s: %s", email, str(err))
 
     user_dict = document_to_dict(user_doc)
     access_token = create_access_token(
@@ -117,6 +155,12 @@ async def login(payload: UserLogin) -> TokenResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if settings.REQUIRE_VERIFIED_EMAIL_FOR_LOGIN and not user_doc.get("isEmailVerified", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address has not been verified. Please verify your email first.",
+        )
+
     user_dict = document_to_dict(user_doc)
     access_token = create_access_token(
         subject=user_dict["id"],
@@ -150,13 +194,18 @@ async def get_my_profile(
     response_model=UserResponse,
     summary="Update permitted profile fields for the authenticated user",
 )
+@router.put(
+    "/profile",
+    response_model=UserResponse,
+    summary="Update permitted profile fields for the authenticated user (PUT alias)",
+)
 async def update_profile(
     payload: UserUpdate,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> UserResponse:
     """
-    Allow users to update fullName, phone, emergencyContact, healthConditions,
-    and notificationPreferences.
+    Allow users to update fullName, phone, emergencyContact, emergencyContactData,
+    healthConditions, and notificationPreferences.
     Protected fields (role, _id, passwordHash, createdAt) are strictly preserved.
     """
     updates: Dict[str, Any] = {}
@@ -173,6 +222,11 @@ async def update_profile(
     if payload.phone is not None:
         updates["phone"] = payload.phone.strip() if payload.phone else None
 
+    if payload.emergencyContactData is not None:
+        updates["emergencyContactData"] = payload.emergencyContactData.model_dump()
+        if payload.emergencyContact is None:
+            updates["emergencyContact"] = payload.emergencyContactData.phone
+
     if payload.emergencyContact is not None:
         updates["emergencyContact"] = payload.emergencyContact.strip() if payload.emergencyContact else None
 
@@ -185,6 +239,10 @@ async def update_profile(
             "medicationRemindersEnabled": existing_prefs.get("medicationRemindersEnabled", True),
             "emailReportsEnabled": existing_prefs.get("emailReportsEnabled", False),
             "emailAlertsEnabled": existing_prefs.get("emailAlertsEnabled", False),
+            "missedDoseAlertsEnabled": existing_prefs.get("missedDoseAlertsEnabled", True),
+            "emailNotificationsEnabled": existing_prefs.get("emailNotificationsEnabled", True),
+            "soundEnabled": existing_prefs.get("soundEnabled", True),
+            "vibrationEnabled": existing_prefs.get("vibrationEnabled", True),
         }
         provided = payload.notificationPreferences.model_dump(exclude_unset=True)
         merged_prefs.update(provided)
@@ -206,6 +264,11 @@ async def update_profile(
     "/password",
     status_code=status.HTTP_200_OK,
     summary="Change password for authenticated user",
+)
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_200_OK,
+    summary="Change password for authenticated user (POST alias)",
 )
 async def change_password(
     payload: PasswordChange,
@@ -516,3 +579,475 @@ async def reset_password(payload: ResetPasswordRequest) -> Dict[str, str]:
         )
 
     return {"message": "Password updated successfully. You can now log in with your new password."}
+
+
+@router.post(
+    "/verify-email-otp",
+    response_model=VerifyEmailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify user email address using 6-digit verification code",
+)
+async def verify_email_otp(payload: VerifyEmailRequest) -> VerifyEmailResponse:
+    """
+    Validate 6-digit email verification OTP and mark user account as verified.
+    Security protections:
+    - HMAC-SHA256 comparison against stored hash with server pepper.
+    - Expiration check (10 minutes window).
+    - Max 5 failed attempts limit before invalidating code.
+    - Atomically sets isEmailVerified=True and unsets verification OTP fields.
+    - Returns updated user and fresh JWT access token.
+    """
+    email = payload.email.strip().lower()
+    submitted_code = payload.code.strip()
+    users_coll = get_users_collection()
+
+    user_doc = await users_coll.find_one({"email": email})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired email verification code.",
+        )
+
+    # If already verified
+    if user_doc.get("isEmailVerified", False):
+        user_dict = document_to_dict(user_doc)
+        token = create_access_token(
+            subject=user_dict["id"],
+            role=user_dict["role"],
+            email=user_dict["email"],
+            token_version=user_doc.get("tokenVersion", 0),
+        )
+        return VerifyEmailResponse(
+            message="Email is already verified.",
+            isEmailVerified=True,
+            access_token=token,
+            token_type="bearer",
+            user=UserResponse(**user_dict),
+        )
+
+    stored_hash = user_doc.get("emailVerificationOtpHash")
+    expires_at = user_doc.get("emailVerificationExpiresAt")
+    attempts = user_doc.get("emailVerificationAttempts", 0)
+
+    if not stored_hash or not expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active verification request found. Please request a new code.",
+        )
+
+    now = now_utc()
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    # Expiry validation
+    if now > expires_at:
+        await users_coll.update_one(
+            {"_id": user_doc["_id"]},
+            {
+                "$set": {
+                    "emailVerificationOtpHash": None,
+                    "emailVerificationExpiresAt": None,
+                    "emailVerificationAttempts": 0,
+                    "updatedAt": now,
+                }
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired. Please request a new code.",
+        )
+
+    # Max attempts validation
+    if attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+        await users_coll.update_one(
+            {"_id": user_doc["_id"]},
+            {
+                "$set": {
+                    "emailVerificationOtpHash": None,
+                    "emailVerificationExpiresAt": None,
+                    "emailVerificationAttempts": 0,
+                    "updatedAt": now,
+                }
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. This code has been invalidated. Please request a new code.",
+        )
+
+    # OTP verification via constant-time HMAC-SHA256
+    pepper = settings.get_reset_token_pepper()
+    if not verify_reset_otp(submitted_code, stored_hash, pepper):
+        new_attempts = attempts + 1
+        if new_attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            await users_coll.update_one(
+                {"_id": user_doc["_id"]},
+                {
+                    "$set": {
+                        "emailVerificationOtpHash": None,
+                        "emailVerificationExpiresAt": None,
+                        "emailVerificationAttempts": new_attempts,
+                        "updatedAt": now,
+                    }
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Too many failed attempts. This code has been invalidated. Please request a new code.",
+            )
+        else:
+            await users_coll.update_one(
+                {"_id": user_doc["_id"]},
+                {
+                    "$inc": {"emailVerificationAttempts": 1},
+                    "$set": {"updatedAt": now},
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification code. Please check the code and try again.",
+            )
+
+    # Successfully verified: Atomically update user document
+    updated_user = await users_coll.find_one_and_update(
+        {
+            "_id": user_doc["_id"],
+            "emailVerificationOtpHash": stored_hash,
+        },
+        {
+            "$set": {
+                "isEmailVerified": True,
+                "emailVerificationOtpHash": None,
+                "emailVerificationExpiresAt": None,
+                "emailVerificationAttempts": 0,
+                "emailVerificationRequestedAt": None,
+                "updatedAt": now,
+            }
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code was already used or expired.",
+        )
+
+    logger.info("Email verified successfully for user: %s", email)
+    user_dict = document_to_dict(updated_user)
+    token = create_access_token(
+        subject=user_dict["id"],
+        role=user_dict["role"],
+        email=user_dict["email"],
+        token_version=user_dict.get("tokenVersion", 0),
+    )
+
+    return VerifyEmailResponse(
+        message="Email verified successfully.",
+        isEmailVerified=True,
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse(**user_dict),
+    )
+
+
+@router.post(
+    "/resend-verification-otp",
+    response_model=Dict[str, str],
+    status_code=status.HTTP_200_OK,
+    summary="Resend 6-digit email verification code with cooldown protection",
+)
+async def resend_verification_otp(
+    payload: ResendVerificationOtpRequest,
+    request: Request,
+) -> Dict[str, str]:
+    """
+    Resend a 6-digit email verification code.
+    Protections:
+    - 60-second cooldown between requests.
+    - Max 5 requests per hour rate limiting per email and client IP.
+    - Zero enumeration: always returns generic message.
+    """
+    email = payload.email.strip().lower()
+    generic_message = (
+        "If an unverified account is associated with this email, a new verification code has been sent."
+    )
+
+    client_ip = "unknown"
+    if request.client and request.client.host:
+        client_ip = request.client.host
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+
+    ip_limit = 1000 if client_ip in ("127.0.0.1", "localhost", "testclient", "unknown") else 30
+
+    email_allowed = await rate_limiter.acquire(
+        action="resend_verify_email",
+        key=email,
+        max_requests=5,
+        window_seconds=3600,
+    )
+    ip_allowed = await rate_limiter.acquire(
+        action="resend_verify_ip",
+        key=client_ip,
+        max_requests=ip_limit,
+        window_seconds=3600,
+    )
+
+    if not (email_allowed and ip_allowed):
+        logger.warning(
+            "Rate limit exceeded for resend-verification-otp on: %s (ip: %s)",
+            email,
+            client_ip,
+        )
+        return {"message": generic_message}
+
+    users_coll = get_users_collection()
+    user_doc = await users_coll.find_one({"email": email})
+
+    if not user_doc:
+        pepper = settings.get_reset_token_pepper()
+        dummy_otp = generate_reset_otp()
+        _ = hash_reset_otp(dummy_otp, pepper)
+        return {"message": generic_message}
+
+    if user_doc.get("isEmailVerified", False):
+        return {"message": "Email is already verified."}
+
+    # Cooldown check (60s)
+    last_req = user_doc.get("emailVerificationRequestedAt")
+    now = now_utc()
+    if last_req:
+        if last_req.tzinfo is None:
+            last_req = last_req.replace(tzinfo=timezone.utc)
+        elapsed = (now - last_req).total_seconds()
+        if elapsed < settings.EMAIL_VERIFICATION_COOLDOWN_SECONDS:
+            wait_secs = int(settings.EMAIL_VERIFICATION_COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {wait_secs} seconds before requesting a new code.",
+            )
+
+    otp = generate_reset_otp()
+    pepper = settings.get_reset_token_pepper()
+    otp_hash = hash_reset_otp(otp, pepper)
+    expires_at = now + timedelta(minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES)
+
+    await users_coll.update_one(
+        {"_id": user_doc["_id"]},
+        {
+            "$set": {
+                "emailVerificationOtpHash": otp_hash,
+                "emailVerificationExpiresAt": expires_at,
+                "emailVerificationAttempts": 0,
+                "emailVerificationRequestedAt": now,
+                "updatedAt": now,
+            }
+        },
+    )
+
+    recipient_name = user_doc.get("fullName", "Valued User")
+    try:
+        email_msg = create_email_verification_email(
+            recipient_email=email,
+            recipient_name=recipient_name,
+            otp_code=otp,
+            expire_minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES,
+        )
+        svc = get_email_service()
+        await svc.send_email(email_msg)
+        logger.info("Resent email verification OTP to: %s", email)
+    except Exception as err:
+        logger.error("Failed to resend email verification email to %s: %s", email, str(err))
+
+    return {"message": generic_message}
+
+
+@router.post(
+    "/verify-reset-otp",
+    response_model=VerifyResetOtpResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Validate 6-digit password reset code before submitting new password",
+)
+async def verify_reset_otp_endpoint(payload: VerifyResetOtpRequest) -> VerifyResetOtpResponse:
+    """
+    Validate OTP without resetting password. Useful for step-by-step UI verification.
+    """
+    email = payload.email.strip().lower()
+    submitted_code = payload.code.strip()
+    users_coll = get_users_collection()
+
+    user_doc = await users_coll.find_one({"email": email})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired password reset code.",
+        )
+
+    stored_hash = user_doc.get("passwordResetOtpHash")
+    expires_at = user_doc.get("passwordResetExpiresAt")
+    attempts = user_doc.get("passwordResetAttempts", 0)
+
+    if not stored_hash or not expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active password reset request found. Please request a new code.",
+        )
+
+    now = now_utc()
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if now > expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset code has expired. Please request a new code.",
+        )
+
+    if attempts >= settings.RESET_TOKEN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Too many failed attempts. This reset code has been invalidated. Please request a new code.",
+        )
+
+    pepper = settings.get_reset_token_pepper()
+    if not verify_reset_otp(submitted_code, stored_hash, pepper):
+        await users_coll.update_one(
+            {"_id": user_doc["_id"]},
+            {
+                "$inc": {"passwordResetAttempts": 1},
+                "$set": {"updatedAt": now},
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset code. Please check the code and try again.",
+        )
+
+    return VerifyResetOtpResponse(valid=True, message="Verification code is valid.")
+
+
+@router.get(
+    "/emergency-contact",
+    response_model=EmergencyContactResponse,
+    summary="Get emergency contact information for authenticated user",
+)
+async def get_emergency_contact(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> EmergencyContactResponse:
+    """Return structured and legacy emergency contact info for the caller."""
+    raw_data = current_user.get("emergencyContactData")
+    schema_data = EmergencyContactSchema(**raw_data) if raw_data else None
+    return EmergencyContactResponse(
+        emergencyContact=schema_data,
+        legacyContactString=current_user.get("emergencyContact"),
+    )
+
+
+@router.put(
+    "/emergency-contact",
+    response_model=EmergencyContactResponse,
+    summary="Update or set emergency contact information",
+)
+async def update_emergency_contact(
+    payload: EmergencyContactSchema,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> EmergencyContactResponse:
+    """Save structured emergency contact and sync legacy contact string."""
+    users_coll = get_users_collection()
+    user_oid = to_object_id(current_user["id"])
+    now = now_utc()
+    data_dict = payload.model_dump()
+
+    await users_coll.update_one(
+        {"_id": user_oid},
+        {
+            "$set": {
+                "emergencyContactData": data_dict,
+                "emergencyContact": payload.phone,
+                "updatedAt": now,
+            }
+        },
+    )
+
+    return EmergencyContactResponse(
+        emergencyContact=payload,
+        legacyContactString=payload.phone,
+    )
+
+
+@router.delete(
+    "/emergency-contact",
+    status_code=status.HTTP_200_OK,
+    summary="Remove emergency contact information",
+)
+async def delete_emergency_contact(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Clear emergency contact records for the authenticated user."""
+    users_coll = get_users_collection()
+    user_oid = to_object_id(current_user["id"])
+    await users_coll.update_one(
+        {"_id": user_oid},
+        {
+            "$set": {
+                "emergencyContactData": None,
+                "emergencyContact": None,
+                "updatedAt": now_utc(),
+            }
+        },
+    )
+    return {"message": "Emergency contact removed successfully."}
+
+
+@router.get(
+    "/notification-preferences",
+    response_model=NotificationPreferences,
+    summary="Get notification preferences for authenticated user",
+)
+async def get_notification_preferences(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> NotificationPreferences:
+    """Return user notification preferences."""
+    prefs = current_user.get("notificationPreferences") or {}
+    return NotificationPreferences(**prefs)
+
+
+@router.put(
+    "/notification-preferences",
+    response_model=NotificationPreferences,
+    summary="Update notification preferences for authenticated user",
+)
+async def update_notification_preferences(
+    payload: NotificationPreferencesUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> NotificationPreferences:
+    """Update user notification preferences."""
+    existing_prefs = current_user.get("notificationPreferences") or {}
+    merged_prefs = {
+        "medicationRemindersEnabled": existing_prefs.get("medicationRemindersEnabled", True),
+        "emailReportsEnabled": existing_prefs.get("emailReportsEnabled", False),
+        "emailAlertsEnabled": existing_prefs.get("emailAlertsEnabled", False),
+        "missedDoseAlertsEnabled": existing_prefs.get("missedDoseAlertsEnabled", True),
+        "emailNotificationsEnabled": existing_prefs.get("emailNotificationsEnabled", True),
+        "soundEnabled": existing_prefs.get("soundEnabled", True),
+        "vibrationEnabled": existing_prefs.get("vibrationEnabled", True),
+    }
+    provided = payload.model_dump(exclude_unset=True)
+    merged_prefs.update(provided)
+
+    users_coll = get_users_collection()
+    user_oid = to_object_id(current_user["id"])
+    now = now_utc()
+    await users_coll.update_one(
+        {"_id": user_oid},
+        {
+            "$set": {
+                "notificationPreferences": merged_prefs,
+                "updatedAt": now,
+            }
+        },
+    )
+    return NotificationPreferences(**merged_prefs)
+

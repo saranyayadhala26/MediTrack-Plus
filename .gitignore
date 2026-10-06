@@ -51,8 +51,10 @@ web-build/
 *.p12
 *.key
 *.mobileprovision
-android/
-ios/
+/android/
+/ios/
+/mobile/android/
+/mobile/ios/
 
 # macOS / Windows OS files
 .DS_Store
