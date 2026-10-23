@@ -8,6 +8,7 @@ Provides clean, decoupled email delivery services:
 - Safe error handling: Secrets and SMTP credentials are never logged, exposed, or persisted
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
@@ -105,7 +106,12 @@ class MockEmailService(EmailServiceInterface):
 
         self.sent_messages.append(message)
         generated_id = f"mock-{uuid.uuid4().hex[:12]}"
-        logger.info("MockEmailService: Recorded email to %s (subject: %s)", message.recipient, message.subject)
+        logger.info(
+            "MockEmailService: Recorded email to %s (subject: '%s')\n--- Body ---\n%s\n------------",
+            message.recipient,
+            message.subject,
+            message.text_body,
+        )
         return EmailResult(
             success=True,
             recipient=message.recipient,
@@ -194,6 +200,23 @@ class SMTPEmailService(EmailServiceInterface):
             sanitized = sanitized.replace(self.smtp_password, "[REDACTED]")
         return sanitized
 
+    def _send_sync(self, mime_msg: MIMEMultipart) -> str:
+        """Synchronous SMTP transmission executed within a worker thread."""
+        use_direct_ssl = self.smtp_use_ssl or (self.smtp_port == 465 and self.smtp_use_ssl is not False)
+        if use_direct_ssl:
+            smtp_client = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
+        else:
+            smtp_client = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
+
+        with smtp_client as smtp:
+            if not use_direct_ssl and self.smtp_use_tls:
+                smtp.starttls()
+            if self.smtp_username and self.smtp_password:
+                smtp.login(self.smtp_username, self.smtp_password)
+            smtp.send_message(mime_msg)
+
+        return mime_msg["Message-ID"]
+
     async def send_email(self, message: EmailMessage) -> EmailResult:
         """Send an email over SMTP. Handles TLS/SSL, authentication, and safe error masking."""
         if not self.email_enabled:
@@ -211,22 +234,9 @@ class SMTPEmailService(EmailServiceInterface):
             raise EmailConfigurationError(err_msg)
 
         mime_msg = self.build_mime_message(message)
-        use_direct_ssl = self.smtp_use_ssl or (self.smtp_port == 465 and self.smtp_use_ssl is not False)
 
         try:
-            if use_direct_ssl:
-                smtp_client = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
-            else:
-                smtp_client = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout)
-
-            with smtp_client as smtp:
-                if not use_direct_ssl and self.smtp_use_tls:
-                    smtp.starttls()
-                if self.smtp_username and self.smtp_password:
-                    smtp.login(self.smtp_username, self.smtp_password)
-                smtp.send_message(mime_msg)
-
-            msg_id = mime_msg["Message-ID"]
+            msg_id = await asyncio.to_thread(self._send_sync, mime_msg)
             logger.info("SMTPEmailService: Successfully sent email to %s (id: %s)", message.recipient, msg_id)
             return EmailResult(
                 success=True,

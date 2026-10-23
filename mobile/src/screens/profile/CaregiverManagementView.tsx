@@ -87,6 +87,11 @@ export const CaregiverManagementView: React.FC<CaregiverManagementViewProps> = (
     try {
       setIsLoading(true);
       setFetchError(null);
+      if (isCaregiver) {
+        setCaregivers([]);
+        setIsLoading(false);
+        return;
+      }
       const data = await getCaregivers("active");
       setCaregivers(data || []);
     } catch (err: any) {
@@ -94,7 +99,7 @@ export const CaregiverManagementView: React.FC<CaregiverManagementViewProps> = (
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isCaregiver]);
 
   useEffect(() => {
     loadCaregivers();
@@ -733,6 +738,35 @@ export const CaregiverManagementView: React.FC<CaregiverManagementViewProps> = (
                   Only the information supported by your caregiver connection is
                   shared with your caregiver. Caregivers have read-only monitoring
                   access and cannot change your medicines or medication schedules.
+                </Text>
+              </View>
+            </View>
+          </>
+        ) : isCaregiver ? (
+          /* CAREGIVER ROLE VIEW (Caregivers monitor patients who link them) */
+          <>
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="people-outline" size={40} color="#0D9488" />
+              </View>
+              <Text style={styles.emptyTitle}>Caregiver Account</Text>
+              <Text style={styles.emptySubtitle}>
+                Patients can link you as their caregiver by adding your registered email address from their MediTrack+ account.
+              </Text>
+            </View>
+
+            {/* Privacy Note */}
+            <View style={styles.privacyCard}>
+              <Ionicons
+                name="information-circle-outline"
+                size={22}
+                color="#0D9488"
+                style={styles.privacyIcon}
+              />
+              <View style={styles.privacyTextCol}>
+                <Text style={styles.privacyTitle}>Your role matters</Text>
+                <Text style={styles.privacyDescription}>
+                  As a linked caregiver, you have read-only access to view medication adherence and receive missed dose alerts for your patients.
                 </Text>
               </View>
             </View>

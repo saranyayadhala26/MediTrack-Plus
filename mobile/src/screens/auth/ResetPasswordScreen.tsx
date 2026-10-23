@@ -86,6 +86,13 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync email if initialEmail updates from navigation
+  useEffect(() => {
+    if (initialEmail && initialEmail !== email) {
+      setEmail(initialEmail);
+    }
+  }, [initialEmail]);
+
   // Resend cooldown timer
   useEffect(() => {
     if (cooldown > 0) {

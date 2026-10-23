@@ -104,6 +104,9 @@ async def register(payload: UserRegister) -> TokenResponse:
     await users_coll.insert_one(user_doc)
     logger.info("New user registered successfully: %s (role: %s)", email, user_doc["role"])
 
+    if settings.DEBUG or settings.ENVIRONMENT != "production":
+        logger.info("🔑 [DEV ONLY] Email verification OTP for %s: %s", email, otp)
+
     # Dispatch email verification OTP asynchronously
     try:
         email_msg = create_email_verification_email(
@@ -384,6 +387,8 @@ async def forgot_password(
     expires_at = now + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
 
     # Store hashed OTP and reset attempts on user document
+    if settings.DEBUG or settings.ENVIRONMENT != "production":
+        logger.info("🔑 [DEV ONLY] Password reset OTP for %s: %s", email, otp)
     await users_coll.update_one(
         {"_id": user_doc["_id"]},
         {
@@ -833,6 +838,9 @@ async def resend_verification_otp(
     pepper = settings.get_reset_token_pepper()
     otp_hash = hash_reset_otp(otp, pepper)
     expires_at = now + timedelta(minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES)
+
+    if settings.DEBUG or settings.ENVIRONMENT != "production":
+        logger.info("🔑 [DEV ONLY] Resent email verification OTP for %s: %s", email, otp)
 
     await users_coll.update_one(
         {"_id": user_doc["_id"]},
