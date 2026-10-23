@@ -1,15 +1,16 @@
 /**
- * Reusable Card Component with Clean Elevation & Border
+ * Reusable MediTrack+ Card Component
+ * Crisp white background, subtle border, very subtle shadow, 12px corner radius.
  */
 
 import React from "react";
 import { View, StyleSheet, ViewStyle, StyleProp } from "react-native";
-import { colors, borderRadius, spacing } from "../../constants/theme";
+import { colors, borderRadius, spacing, shadows } from "../../constants/theme";
 
-interface CardProps {
+export interface CardProps {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
-  variant?: "default" | "outlined" | "flat";
+  variant?: "default" | "outlined" | "flat" | "elevated";
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -21,7 +22,7 @@ export const Card: React.FC<CardProps> = ({
     <View
       style={[
         styles.base,
-        variant === "default" && styles.elevated,
+        (variant === "default" || variant === "elevated") && styles.defaultCard,
         variant === "outlined" && styles.outlined,
         variant === "flat" && styles.flat,
         style,
@@ -35,24 +36,22 @@ export const Card: React.FC<CardProps> = ({
 const styles = StyleSheet.create({
   base: {
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  elevated: {
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    borderRadius: borderRadius.lg, // 12px
+    padding: spacing.lg, // 16px
+    marginBottom: spacing.md, // 12px
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: colors.border,
+  },
+  defaultCard: {
+    ...shadows.card,
   },
   outlined: {
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   flat: {
     backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
 });

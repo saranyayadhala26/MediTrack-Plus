@@ -1,7 +1,6 @@
 /**
- * Medication Calendar & Adherence Streaks Screen (Phase 8).
- * Visualizes scheduled medication occurrences, daily adherence states,
- * and clinically rigorous streak tracking for patient engagement.
+ * Medication Calendar Screen for MediTrack+
+ * Redesigned to match the finalized MediTrack+ UI design reference (page 28 of ui.pdf).
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,29 +16,22 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   getAdherenceStreaks,
   getLocalTodayString,
   getMedicationCalendar,
 } from "../../api/calendar";
-import { Card } from "../../components/common/Card";
-import { config } from "../../constants/config";
+import { colors, spacing } from "../../constants/theme";
 import {
-  accessibility,
-  borderRadius,
-  colors,
-  spacing,
-  typography,
-} from "../../constants/theme";
-import {
-  CalendarOccurrence,
   CalendarResponse,
   DayAggregateStatus,
   DaySummary,
   StreakData,
 } from "../../types";
+import { EmptyState } from "../../components/common";
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const MONTH_NAMES = [
   "January",
@@ -56,25 +48,43 @@ const MONTH_NAMES = [
   "December",
 ];
 
-function formatTime(time24: string): string {
+const PILL_COLORS = [
+  { bg: "#DCFCE7", color: "#16A34A" }, // Green
+  { bg: "#FEF3C7", color: "#D97706" }, // Amber
+  { bg: "#E0F2FE", color: "#0284C7" }, // Blue
+  { bg: "#FEE2E2", color: "#DC2626" }, // Red
+  { bg: "#F3E8FF", color: "#9333EA" }, // Purple
+];
+
+function formatTime(time24?: string): string {
   if (!time24) return "";
   const [hoursStr, minsStr] = time24.split(":");
   const hours = parseInt(hoursStr, 10);
+  if (isNaN(hours)) return time24;
   const ampm = hours >= 12 ? "PM" : "AM";
   const displayHours = hours % 12 || 12;
-  return `${displayHours}:${minsStr || "00"} ${ampm}`;
+  const displayHoursStr = String(displayHours).padStart(2, "0");
+  return `${displayHoursStr}:${minsStr || "00"} ${ampm}`;
 }
 
-function formatDateLong(dateStr: string): string {
+function formatSelectedDateFull(dateStr: string): string {
   if (!dateStr) return "";
-  const [year, month, day] = dateStr.split("-").map((v) => parseInt(v, 10));
+  const parts = dateStr.split("-").map((v) => parseInt(v, 10));
+  if (parts.length !== 3) return dateStr;
+  const [year, month, day] = parts;
   const d = new Date(year, month - 1, day);
-  return d.toLocaleDateString(undefined, {
-    weekday: "long",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const weekdays = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const dayName = weekdays[d.getDay()];
+  const monthName = MONTH_NAMES[month - 1];
+  return `${dayName}, ${day} ${monthName} ${year}`;
 }
 
 export const CalendarScreen: React.FC = () => {
@@ -83,7 +93,7 @@ export const CalendarScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() => localToday);
 
   const [calendarData, setCalendarData] = useState<CalendarResponse | null>(null);
-  const [streakData, setStreakData] = useState<StreakData | null>(null);
+  const [, setStreakData] = useState<StreakData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +129,7 @@ export const CalendarScreen: React.FC = () => {
       ]);
       setCalendarData(calRes);
       setStreakData(strkRes);
-    } catch (err: any) {
+    } catch {
       setError("Failed to load medication calendar. Pull to retry.");
     } finally {
       setIsLoading(false);
@@ -145,12 +155,6 @@ export const CalendarScreen: React.FC = () => {
     setViewDate(new Date(currentYear, currentMonth + 1, 1));
   };
 
-  const handleJumpToToday = () => {
-    const now = new Date();
-    setViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
-    setSelectedDate(localToday);
-  };
-
   // Map of date string -> DaySummary
   const daySummaryMap = useMemo(() => {
     const map = new Map<string, DaySummary>();
@@ -167,38 +171,55 @@ export const CalendarScreen: React.FC = () => {
     return calendarData.occurrences.filter((occ) => occ.date === selectedDate);
   }, [calendarData, selectedDate]);
 
-  // Selected date's aggregate summary
+  // Selected date summary
   const selectedDaySummary = useMemo(() => {
     return daySummaryMap.get(selectedDate);
   }, [daySummaryMap, selectedDate]);
 
-  // Generate grid cells for the current month view
+  // Daily Adherence metrics
+  const totalDoses =
+    selectedDaySummary?.totalDoses ?? selectedOccurrences.length;
+  const takenCount =
+    selectedDaySummary?.takenCount ??
+    selectedOccurrences.filter((o) => o.status === "Taken").length;
+  const adherencePercent =
+    totalDoses > 0 ? Math.round((takenCount / totalDoses) * 100) : 100;
+
+  // Generate 7-column calendar grid (Monday to Sunday)
   const calendarCells = useMemo(() => {
-    const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
+    const firstDayDate = new Date(currentYear, currentMonth, 1);
+    // Monday as first day: 0=Mon, 1=Tue, ..., 6=Sun
+    const firstDayOfWeek = (firstDayDate.getDay() + 6) % 7;
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
 
     const cells: Array<{
       key: string;
-      dayNumber: number | null;
-      dateStr: string | null;
+      dayNumber: number;
+      dateStr: string;
+      isCurrentMonth: boolean;
       isToday: boolean;
       isSelected: boolean;
       status: DayAggregateStatus;
-      totalDoses: number;
-      takenCount: number;
     }> = [];
 
-    // Leading blanks
+    // Leading days from previous month
     for (let i = 0; i < firstDayOfWeek; i++) {
+      const dayNum = daysInPrevMonth - firstDayOfWeek + 1 + i;
+      const prevDate = new Date(currentYear, currentMonth - 1, dayNum);
+      const mStr = String(prevDate.getMonth() + 1).padStart(2, "0");
+      const dStr = String(dayNum).padStart(2, "0");
+      const dateStr = `${prevDate.getFullYear()}-${mStr}-${dStr}`;
+      const summary = daySummaryMap.get(dateStr);
+
       cells.push({
-        key: `pad-start-${i}`,
-        dayNumber: null,
-        dateStr: null,
-        isToday: false,
-        isSelected: false,
-        status: "None",
-        totalDoses: 0,
-        takenCount: 0,
+        key: `prev-${dateStr}`,
+        dayNumber: dayNum,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === localToday,
+        isSelected: dateStr === selectedDate,
+        status: summary?.status || "None",
       });
     }
 
@@ -210,55 +231,52 @@ export const CalendarScreen: React.FC = () => {
       const summary = daySummaryMap.get(dateStr);
 
       cells.push({
-        key: dateStr,
+        key: `curr-${dateStr}`,
         dayNumber: day,
         dateStr,
+        isCurrentMonth: true,
         isToday: dateStr === localToday,
         isSelected: dateStr === selectedDate,
         status: summary?.status || "None",
-        totalDoses: summary?.totalDoses || 0,
-        takenCount: summary?.takenCount || 0,
+      });
+    }
+
+    // Trailing days from next month to complete the row
+    const remaining = (7 - (cells.length % 7)) % 7;
+    for (let day = 1; day <= remaining; day++) {
+      const nextDate = new Date(currentYear, currentMonth + 1, day);
+      const mStr = String(nextDate.getMonth() + 1).padStart(2, "0");
+      const dStr = String(day).padStart(2, "0");
+      const dateStr = `${nextDate.getFullYear()}-${mStr}-${dStr}`;
+      const summary = daySummaryMap.get(dateStr);
+
+      cells.push({
+        key: `next-${dateStr}`,
+        dayNumber: day,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === localToday,
+        isSelected: dateStr === selectedDate,
+        status: summary?.status || "None",
       });
     }
 
     return cells;
   }, [currentYear, currentMonth, daySummaryMap, localToday, selectedDate]);
 
-  const renderStatusDot = (status: DayAggregateStatus) => {
-    switch (status) {
-      case "Adherent":
-        return <View style={[styles.statusDot, styles.dotAdherent]} />;
-      case "Skipped":
-        return <View style={[styles.statusDot, styles.dotSkipped]} />;
-      case "Snoozed":
-        return <View style={[styles.statusDot, styles.dotSnoozed]} />;
-      case "Pending":
-        return <View style={[styles.statusDot, styles.dotPending]} />;
-      default:
-        return <View style={styles.statusDotEmpty} />;
-    }
-  };
-
-  const getDayStatusBadge = (status?: DayAggregateStatus) => {
-    switch (status) {
-      case "Adherent":
-        return { label: "All Doses Taken", bg: colors.takenLight, color: colors.taken };
-      case "Skipped":
-        return { label: "Dose Skipped", bg: colors.skippedLight, color: colors.skipped };
-      case "Snoozed":
-        return { label: "Dose Snoozed", bg: colors.snoozedLight, color: colors.snoozed };
-      case "Pending":
-        return { label: "Doses Scheduled", bg: colors.dueLight, color: colors.due };
-      default:
-        return { label: "No Doses Scheduled", bg: colors.surfaceSubtle, color: colors.textMuted };
-    }
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.surface} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
+      {/* 1. Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Calendar</Text>
+        <Text style={styles.headerSubtitle}>Track your medication activity.</Text>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -268,101 +286,49 @@ export const CalendarScreen: React.FC = () => {
           />
         }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Medication Calendar</Text>
-          <Text style={styles.headerSubtitle}>
-            Adherence streaks & scheduled occurrences
-          </Text>
-        </View>
-
-        {/* Adherence Streak Summary Card */}
-        <Card style={styles.streakCard}>
-          <View style={styles.streakHeader}>
-            <Text style={styles.streakTitle}>Adherence Streaks</Text>
-            <Text style={styles.streakSubtitle}>
-              Consecutive days with all prescribed doses taken
-            </Text>
+        {/* Error message */}
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Ionicons
+              name="alert-circle-outline"
+              size={18}
+              color={colors.danger}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.errorBannerText}>{error}</Text>
           </View>
+        ) : null}
 
-          <View style={styles.streakStatsRow}>
-            {/* Current Streak */}
-            <View style={styles.streakStatItem}>
-              <Text style={styles.streakStatEmoji}>🔥</Text>
-              <Text style={styles.streakStatValue}>
-                {streakData?.currentStreak ?? 0}
-              </Text>
-              <Text style={styles.streakStatLabel}>Current Streak</Text>
-            </View>
-
-            {/* Divider */}
-            <View style={styles.statDivider} />
-
-            {/* Longest Streak */}
-            <View style={styles.streakStatItem}>
-              <Text style={styles.streakStatEmoji}>🏆</Text>
-              <Text style={styles.streakStatValue}>
-                {streakData?.longestStreak ?? 0}
-              </Text>
-              <Text style={styles.streakStatLabel}>Longest Streak</Text>
-            </View>
-
-            {/* Divider */}
-            <View style={styles.statDivider} />
-
-            {/* Total Adherent Days */}
-            <View style={styles.streakStatItem}>
-              <Text style={styles.streakStatEmoji}>✅</Text>
-              <Text style={styles.streakStatValue}>
-                {streakData?.totalAdherentDays ?? 0}
-              </Text>
-              <Text style={styles.streakStatLabel}>Adherent Days</Text>
-            </View>
-          </View>
-
-          <Text style={styles.streakRuleNote}>
-            • Days without scheduled doses are neutral and do not break streaks.
-          </Text>
-        </Card>
-
-        {/* Month Navigation Card */}
-        <Card style={styles.calendarCard}>
+        {/* 2 & 3. Monthly Calendar Card */}
+        <View style={styles.calendarCard}>
+          {/* Month Navigation Row */}
           <View style={styles.monthNavRow}>
             <TouchableOpacity
               onPress={handlePrevMonth}
-              style={styles.navButton}
-              accessibilityLabel="Previous month"
+              style={styles.navChevronBtn}
               accessibilityRole="button"
+              accessibilityLabel="Previous month"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={styles.navButtonText}>‹</Text>
+              <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
 
-            <View style={styles.monthYearContainer}>
-              <Text style={styles.monthYearText}>
-                {MONTH_NAMES[currentMonth]} {currentYear}
-              </Text>
-            </View>
+            <Text style={styles.monthTitleText}>
+              {MONTH_NAMES[currentMonth]} {currentYear}
+            </Text>
 
             <TouchableOpacity
               onPress={handleNextMonth}
-              style={styles.navButton}
+              style={styles.navChevronBtn}
+              accessibilityRole="button"
               accessibilityLabel="Next month"
-              accessibilityRole="button"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text style={styles.navButtonText}>›</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleJumpToToday}
-              style={styles.todayButton}
-              accessibilityLabel="Jump to today"
-              accessibilityRole="button"
-            >
-              <Text style={styles.todayButtonText}>Today</Text>
+              <Ionicons name="chevron-forward" size={20} color={colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
-          {/* Weekday Row */}
+          {/* Weekday Columns Row */}
           <View style={styles.weekdayRow}>
             {WEEKDAYS.map((day) => (
               <Text key={day} style={styles.weekdayText}>
@@ -373,197 +339,225 @@ export const CalendarScreen: React.FC = () => {
 
           {/* Calendar Grid */}
           {isLoading && !isRefreshing ? (
-            <View style={styles.gridLoader}>
+            <View style={styles.loaderBox}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.loadingText}>Loading calendar...</Text>
             </View>
           ) : (
             <View style={styles.calendarGrid}>
               {calendarCells.map((cell) => {
-                if (cell.dayNumber === null) {
-                  return <View key={cell.key} style={styles.dayCellEmpty} />;
-                }
+                const isTaken = cell.status === "Adherent";
+                const isSkipped = cell.status === "Skipped";
+                const isPending = cell.status === "Pending" || cell.status === "Snoozed";
 
                 return (
                   <TouchableOpacity
                     key={cell.key}
-                    style={[
-                      styles.dayCell,
-                      cell.isToday && styles.dayCellToday,
-                      cell.isSelected && styles.dayCellSelected,
-                    ]}
+                    style={styles.dayCell}
                     onPress={() => {
-                      if (cell.dateStr) {
-                        setSelectedDate(cell.dateStr);
+                      setSelectedDate(cell.dateStr);
+                      if (!cell.isCurrentMonth) {
+                        setViewDate(new Date(cell.dateStr));
                       }
                     }}
+                    activeOpacity={0.7}
                     accessibilityRole="button"
-                    accessibilityLabel={`${MONTH_NAMES[currentMonth]} ${cell.dayNumber}, Status: ${cell.status}`}
-                    accessibilityState={{ selected: cell.isSelected }}
+                    accessibilityLabel={`${cell.dayNumber}, ${cell.status}`}
                   >
-                    <Text
+                    <View
                       style={[
-                        styles.dayNumberText,
-                        cell.isToday && styles.dayNumberToday,
-                        cell.isSelected && styles.dayNumberSelected,
+                        styles.dayNumberWrapper,
+                        cell.isSelected ? styles.dayNumberSelected : null,
                       ]}
                     >
-                      {cell.dayNumber}
-                    </Text>
-                    {renderStatusDot(cell.status)}
+                      <Text
+                        style={[
+                          styles.dayText,
+                          !cell.isCurrentMonth ? styles.dayTextOverflow : null,
+                          cell.isSelected ? styles.dayTextSelected : null,
+                        ]}
+                      >
+                        {cell.dayNumber}
+                      </Text>
+                      <View
+                        style={[
+                          styles.activityDot,
+                          cell.isSelected
+                            ? styles.dotSelected
+                            : isTaken
+                            ? styles.dotTaken
+                            : isPending
+                            ? styles.dotPending
+                            : isSkipped
+                            ? styles.dotSkipped
+                            : styles.dotEmpty,
+                        ]}
+                      />
+                    </View>
                   </TouchableOpacity>
                 );
               })}
             </View>
           )}
+        </View>
 
-          {/* Calendar Legend */}
-          <View style={styles.legendRow}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, styles.dotAdherent]} />
-              <Text style={styles.legendLabel}>Adherent</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, styles.dotSkipped]} />
-              <Text style={styles.legendLabel}>Skipped</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, styles.dotSnoozed]} />
-              <Text style={styles.legendLabel}>Snoozed</Text>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, styles.dotPending]} />
-              <Text style={styles.legendLabel}>Scheduled</Text>
-            </View>
-          </View>
-        </Card>
-
-        {/* Selected Date Occurrences Section */}
-        <View style={styles.occurrencesSection}>
-          <View style={styles.selectedDateHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.selectedDateTitle}>
-                {formatDateLong(selectedDate)}
-              </Text>
-              <Text style={styles.selectedDateSubtitle}>
-                {selectedOccurrences.length}{" "}
-                {selectedOccurrences.length === 1 ? "dose" : "doses"} scheduled
-              </Text>
-            </View>
-
-            {/* Day Aggregate Badge */}
-            {(() => {
-              const badge = getDayStatusBadge(selectedDaySummary?.status);
-              return (
-                <View style={[styles.dayStatusBadge, { backgroundColor: badge.bg }]}>
-                  <Text style={[styles.dayStatusBadgeText, { color: badge.color }]}>
-                    {badge.label}
-                  </Text>
-                </View>
-              );
-            })()}
+        {/* 4. Daily Adherence Summary Card */}
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHeaderRow}>
+            <Text style={styles.summaryDateTitle}>
+              {formatSelectedDateFull(selectedDate)}
+            </Text>
+            {selectedDate === localToday ? (
+              <View style={styles.todayChip}>
+                <Text style={styles.todayChipText}>Today</Text>
+              </View>
+            ) : null}
           </View>
 
-          {/* Occurrences List */}
+          <View style={styles.summaryMetricsRow}>
+            {/* Left metric: Daily adherence */}
+            <View style={styles.metricLeftCol}>
+              <Text style={styles.metricLabel}>Daily adherence</Text>
+              <Text style={styles.metricPercentText}>{adherencePercent}%</Text>
+            </View>
+
+            {/* Vertical divider */}
+            <View style={styles.metricDivider} />
+
+            {/* Right metric: Progress bar */}
+            <View style={styles.metricRightCol}>
+              <Text style={styles.metricDosesText}>
+                {totalDoses > 0
+                  ? `${takenCount} of ${totalDoses} doses completed`
+                  : "No doses scheduled"}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${adherencePercent}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* 5. Medication Schedule Section */}
+        <View style={styles.scheduleSection}>
+          <View style={styles.scheduleHeaderRow}>
+            <Text style={styles.scheduleSectionTitle}>Medication schedule</Text>
+            <Text style={styles.scheduleCountText}>
+              {totalDoses} {totalDoses === 1 ? "dose" : "doses"}
+            </Text>
+          </View>
+
           {selectedOccurrences.length === 0 ? (
-            <Card style={styles.emptyCard}>
-              <Text style={styles.emptyEmoji}>📅</Text>
-              <Text style={styles.emptyTitle}>No Doses Scheduled</Text>
-              <Text style={styles.emptySubtitle}>
-                No prescribed medicines have an active intake schedule on this date.
-              </Text>
-            </Card>
+            /* 6. Empty Selected Day */
+            <EmptyState variant="calendar" />
           ) : (
             selectedOccurrences.map((occ, idx) => {
+              const pillTheme = PILL_COLORS[idx % PILL_COLORS.length];
               const isTaken = occ.status === "Taken";
               const isSkipped = occ.status === "Skipped";
               const isSnoozed = occ.status === "Snoozed";
-              const isPending = occ.status === "Pending";
 
               return (
-                <Card key={`${occ.scheduleId}-${occ.scheduledTime}-${idx}`} style={styles.occCard}>
-                  <View style={styles.occHeader}>
-                    <View style={styles.occTimeCol}>
-                      <Text style={styles.occTimeText}>
-                        {formatTime(occ.scheduledTime)}
-                      </Text>
-                      <Text style={styles.occFreqText}>
-                        {occ.frequencyType.toUpperCase()}
-                      </Text>
-                    </View>
+                <View
+                  key={`${occ.scheduleId}-${occ.scheduledTime}-${idx}`}
+                  style={styles.occCard}
+                >
+                  {/* Scheduled Time */}
+                  <Text style={styles.occTimeText}>
+                    {formatTime(occ.scheduledTime)}
+                  </Text>
 
-                    <View style={styles.occMedCol}>
-                      <Text style={styles.occMedName}>{occ.medicineName}</Text>
-                      <Text style={styles.occDosage}>
-                        {occ.dosage} {occ.dosageUnit}
-                      </Text>
-                    </View>
-
-                    {/* Occurrence Status Badge */}
-                    <View
-                      style={[
-                        styles.occBadge,
-                        isTaken && styles.occBadgeTaken,
-                        isSkipped && styles.occBadgeSkipped,
-                        isSnoozed && styles.occBadgeSnoozed,
-                        isPending && styles.occBadgePending,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.occBadgeText,
-                          isTaken && styles.occBadgeTextTaken,
-                          isSkipped && styles.occBadgeTextSkipped,
-                          isSnoozed && styles.occBadgeTextSnoozed,
-                          isPending && styles.occBadgeTextPending,
-                        ]}
-                      >
-                        {isTaken && "✓ Taken"}
-                        {isSkipped && "✕ Skipped"}
-                        {isSnoozed && `⏰ Snoozed${occ.snoozeCount > 1 ? ` (${occ.snoozeCount}x)` : ""}`}
-                        {isPending && "⏳ Pending"}
-                      </Text>
-                    </View>
+                  {/* Colored Pill Icon Circle */}
+                  <View
+                    style={[
+                      styles.occPillCircle,
+                      { backgroundColor: pillTheme.bg },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name="pill"
+                      size={18}
+                      color={pillTheme.color}
+                    />
                   </View>
 
-                  {/* Context Info (Action Time / Skip Reason / Snooze history) */}
-                  {isTaken && occ.actionTime && (
-                    <View style={styles.occFooter}>
-                      <Text style={styles.occFooterText}>
-                        Taken at {new Date(occ.actionTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        {occ.wasSnoozed ? " (previously snoozed)" : ""}
-                      </Text>
-                    </View>
-                  )}
+                  {/* Medicine Name and Dosage */}
+                  <View style={styles.occInfoCol}>
+                    <Text style={styles.occMedName} numberOfLines={1}>
+                      {occ.medicineName}
+                    </Text>
+                    <Text style={styles.occDosageText} numberOfLines={1}>
+                      {occ.dosage} {occ.dosageUnit}  •  1 {occ.dosageUnit || "tablet"}
+                    </Text>
+                  </View>
 
-                  {isSkipped && occ.skipReason && (
-                    <View style={[styles.occFooter, styles.occFooterSkipped]}>
-                      <Text style={styles.occFooterSkippedText}>
-                        Reason: {occ.skipReason}
-                      </Text>
-                    </View>
-                  )}
+                  {/* Status Pill */}
+                  <View
+                    style={[
+                      styles.statusPill,
+                      isTaken
+                        ? styles.statusPillTaken
+                        : isSkipped
+                        ? styles.statusPillSkipped
+                        : isSnoozed
+                        ? styles.statusPillSnoozed
+                        : styles.statusPillPending,
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        isTaken
+                          ? "checkmark-circle"
+                          : isSkipped
+                          ? "close-circle"
+                          : isSnoozed
+                          ? "alarm-outline"
+                          : "time-outline"
+                      }
+                      size={14}
+                      color={
+                        isTaken
+                          ? "#16A34A"
+                          : isSkipped
+                          ? "#DC2626"
+                          : isSnoozed
+                          ? "#D97706"
+                          : "#D97706"
+                      }
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        isTaken
+                          ? styles.statusPillTextTaken
+                          : isSkipped
+                          ? styles.statusPillTextSkipped
+                          : isSnoozed
+                          ? styles.statusPillTextSnoozed
+                          : styles.statusPillTextPending,
+                      ]}
+                    >
+                      {occ.status}
+                    </Text>
+                  </View>
 
-                  {isSnoozed && (
-                    <View style={[styles.occFooter, styles.occFooterSnoozed]}>
-                      <Text style={styles.occFooterSnoozedText}>
-                        Snoozed reminder will trigger again in 10 minutes.
-                      </Text>
-                    </View>
-                  )}
-                </Card>
+                  {/* Navigation indicator */}
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color="#94A3B8"
+                    style={{ marginLeft: 6 }}
+                  />
+                </View>
               );
             })
           )}
         </View>
-
-        {/* Medical Disclaimer Card */}
-        <Card style={styles.disclaimerCard}>
-          <Text style={styles.disclaimerTitle}>Clinical Disclaimer</Text>
-          <Text style={styles.disclaimerText}>
-            {config.medicalDisclaimer}
-          </Text>
-        </Card>
       </ScrollView>
     </SafeAreaView>
   );
@@ -572,394 +566,365 @@ export const CalendarScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#F8FAFC",
   },
-  scrollContent: {
-    paddingHorizontal: spacing.lg,
-    paddingTop:
-      Platform.OS === "android"
-        ? (StatusBar.currentHeight || 24) + spacing.md
-        : spacing.lg,
-    paddingBottom: spacing.huge * 2,
-  },
+
+  /* 1. Top Header */
   header: {
-    marginBottom: spacing.lg,
+    backgroundColor: "#FFFFFF",
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 8 : 12,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
   headerTitle: {
-    ...typography.h1,
+    fontSize: 24,
+    fontWeight: "800",
     color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-  streakCard: {
-    backgroundColor: colors.surface,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
-  },
-  streakHeader: {
-    marginBottom: spacing.md,
-  },
-  streakTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-  },
-  streakSubtitle: {
-    ...typography.small,
-    color: colors.textMuted,
+    fontSize: 14,
+    color: colors.textSecondary,
     marginTop: 2,
   },
-  streakStatsRow: {
+
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 40,
+  },
+
+  /* Error Banner */
+  errorBanner: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-around",
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
   },
-  streakStatItem: {
-    alignItems: "center",
+  errorBannerText: {
     flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: "500",
   },
-  streakStatEmoji: {
-    fontSize: 20,
-    marginBottom: 2,
-  },
-  streakStatValue: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  streakStatLabel: {
-    ...typography.small,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: colors.borderLight,
-  },
-  streakRuleNote: {
-    ...typography.small,
-    color: colors.textMuted,
-    marginTop: spacing.md,
-    fontStyle: "italic",
-  },
+
+  /* 2 & 3. Month Calendar Card */
   calendarCard: {
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   monthNavRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
-  navButton: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.surfaceSubtle,
+  navChevronBtn: {
+    width: 32,
+    height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
-  navButtonText: {
-    fontSize: 26,
-    fontWeight: "600",
+  monthTitleText: {
+    fontSize: 16,
+    fontWeight: "700",
     color: colors.textPrimary,
-    lineHeight: 28,
-  },
-  monthYearContainer: {
-    flex: 1,
-    alignItems: "center",
-  },
-  monthYearText: {
-    ...typography.h3,
-    color: colors.textPrimary,
-  },
-  todayButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.primaryLight,
-  },
-  todayButtonText: {
-    ...typography.small,
-    fontWeight: "600",
-    color: colors.primaryDark,
   },
   weekdayRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-    paddingBottom: spacing.sm,
-    marginBottom: spacing.xs,
+    marginBottom: 10,
   },
   weekdayText: {
-    flex: 1,
+    width: "14.285%",
     textAlign: "center",
-    ...typography.small,
-    fontWeight: "600",
-    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.textSecondary,
   },
-  gridLoader: {
-    paddingVertical: spacing.xl,
+  loaderBox: {
+    paddingVertical: 40,
     alignItems: "center",
-  },
-  loadingText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
   },
   calendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-  },
-  dayCellEmpty: {
-    width: "14.285%",
-    aspectRatio: 1,
   },
   dayCell: {
     width: "14.285%",
     aspectRatio: 1,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: borderRadius.md,
-    padding: 2,
-    minHeight: 40,
   },
-  dayCellToday: {
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-  },
-  dayCellSelected: {
-    backgroundColor: colors.primaryDark,
-  },
-  dayNumberText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.textPrimary,
-  },
-  dayNumberToday: {
-    color: colors.primaryDark,
-    fontWeight: "700",
-  },
-  dayNumberSelected: {
-    color: colors.textInverse,
-    fontWeight: "700",
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 3,
-  },
-  statusDotEmpty: {
-    width: 6,
-    height: 6,
-    marginTop: 3,
-  },
-  dotAdherent: {
-    backgroundColor: colors.taken,
-  },
-  dotSkipped: {
-    backgroundColor: colors.skipped,
-  },
-  dotSnoozed: {
-    backgroundColor: colors.snoozed,
-  },
-  dotPending: {
-    backgroundColor: colors.due,
-  },
-  legendRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-    paddingTop: spacing.md,
-    marginTop: spacing.md,
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  legendLabel: {
-    ...typography.small,
-    color: colors.textSecondary,
-  },
-  occurrencesSection: {
-    marginBottom: spacing.lg,
-  },
-  selectedDateHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.md,
-  },
-  selectedDateTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-  },
-  selectedDateSubtitle: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  dayStatusBadge: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
-  dayStatusBadgeText: {
-    ...typography.small,
-    fontWeight: "700",
-  },
-  emptyCard: {
-    backgroundColor: colors.surface,
-    padding: spacing.xl,
+  dayNumberWrapper: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
   },
-  emptyEmoji: {
-    fontSize: 32,
-    marginBottom: spacing.sm,
+  dayNumberSelected: {
+    backgroundColor: colors.primary,
   },
-  emptyTitle: {
-    ...typography.h3,
+  dayText: {
+    fontSize: 14,
+    fontWeight: "500",
     color: colors.textPrimary,
   },
-  emptySubtitle: {
-    ...typography.caption,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginTop: spacing.xs,
+  dayTextOverflow: {
+    color: "#CBD5E1",
   },
-  occCard: {
-    backgroundColor: colors.surface,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.borderLight,
+  dayTextSelected: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
-  occHeader: {
+  activityDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 2,
+  },
+  dotSelected: {
+    backgroundColor: "#FFFFFF",
+  },
+  dotTaken: {
+    backgroundColor: "#16A34A",
+  },
+  dotPending: {
+    backgroundColor: "#D97706",
+  },
+  dotSkipped: {
+    backgroundColor: "#DC2626",
+  },
+  dotEmpty: {
+    backgroundColor: "#E2E8F0",
+  },
+
+  /* 4. Daily Adherence Summary Card */
+  summaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  summaryHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  summaryDateTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  todayChip: {
+    backgroundColor: "#CCFBF1",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  todayChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.primaryDark,
+  },
+  summaryMetricsRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-  occTimeCol: {
-    width: 84,
+  metricLeftCol: {
+    width: 100,
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: "500",
+  },
+  metricPercentText: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: colors.primary,
+    marginTop: 2,
+  },
+  metricDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: "#E2E8F0",
+    marginHorizontal: 16,
+  },
+  metricRightCol: {
+    flex: 1,
+  },
+  metricDosesText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  progressTrack: {
+    height: 8,
+    backgroundColor: "#E2E8F0",
+    borderRadius: 4,
+    marginTop: 8,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 4,
+  },
+
+  /* 5. Medication Schedule Section */
+  scheduleSection: {
+    marginTop: 6,
+  },
+  scheduleHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  scheduleSectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  scheduleCountText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+
+  /* Medication Occurrence Card */
+  occCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   occTimeText: {
-    ...typography.body,
+    fontSize: 13,
     fontWeight: "700",
     color: colors.textPrimary,
+    minWidth: 70,
   },
-  occFreqText: {
-    ...typography.small,
-    fontSize: 10,
-    color: colors.textMuted,
-    marginTop: 2,
+  occPillCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
   },
-  occMedCol: {
+  occInfoCol: {
     flex: 1,
-    paddingHorizontal: spacing.sm,
   },
   occMedName: {
-    ...typography.body,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "700",
     color: colors.textPrimary,
   },
-  occDosage: {
-    ...typography.caption,
+  occDosageText: {
+    fontSize: 12,
     color: colors.textSecondary,
     marginTop: 2,
   },
-  occBadge: {
-    paddingHorizontal: spacing.sm,
+
+  /* Status Pills */
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: borderRadius.full,
+    borderRadius: 12,
   },
-  occBadgeTaken: {
-    backgroundColor: colors.takenLight,
+  statusPillTaken: {
+    backgroundColor: "#DCFCE7",
   },
-  occBadgeSkipped: {
-    backgroundColor: colors.skippedLight,
+  statusPillSkipped: {
+    backgroundColor: "#FEE2E2",
   },
-  occBadgeSnoozed: {
-    backgroundColor: colors.snoozedLight,
+  statusPillSnoozed: {
+    backgroundColor: "#FEF3C7",
   },
-  occBadgePending: {
-    backgroundColor: colors.dueLight,
+  statusPillPending: {
+    backgroundColor: "#FEF3C7",
   },
-  occBadgeText: {
-    ...typography.small,
+  statusPillText: {
+    fontSize: 12,
     fontWeight: "700",
   },
-  occBadgeTextTaken: {
-    color: colors.taken,
+  statusPillTextTaken: {
+    color: "#16A34A",
   },
-  occBadgeTextSkipped: {
-    color: colors.skipped,
+  statusPillTextSkipped: {
+    color: "#DC2626",
   },
-  occBadgeTextSnoozed: {
-    color: colors.snoozed,
+  statusPillTextSnoozed: {
+    color: "#D97706",
   },
-  occBadgeTextPending: {
-    color: colors.due,
+  statusPillTextPending: {
+    color: "#D97706",
   },
-  occFooter: {
-    marginTop: spacing.sm,
-    paddingTop: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
+
+  /* 6. Empty Card */
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
-  occFooterText: {
-    ...typography.small,
-    color: colors.textMuted,
+  emptyIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#F0FDFA",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
   },
-  occFooterSkipped: {
-    borderTopColor: colors.skippedLight,
-  },
-  occFooterSkippedText: {
-    ...typography.small,
-    color: colors.skipped,
-    fontWeight: "500",
-  },
-  occFooterSnoozed: {
-    borderTopColor: colors.snoozedLight,
-  },
-  occFooterSnoozedText: {
-    ...typography.small,
-    color: colors.snoozed,
-    fontWeight: "500",
-  },
-  disclaimerCard: {
-    backgroundColor: colors.surfaceSubtle,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-  },
-  disclaimerTitle: {
-    ...typography.caption,
+  emptyTitle: {
+    fontSize: 15,
     fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  emptySubtitle: {
+    fontSize: 13,
     color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  disclaimerText: {
-    ...typography.small,
-    color: colors.textMuted,
-    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 4,
   },
 });

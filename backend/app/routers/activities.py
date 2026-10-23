@@ -22,6 +22,7 @@ from app.schemas.activity import (
     ActivityCreate,
     ActivityResponse,
 )
+from app.services.adherence_service import calculate_adherence_summary
 from app.utils.mongo import document_to_dict, to_object_id
 
 logger = logging.getLogger("meditrack.activities")
@@ -232,6 +233,19 @@ async def record_activity(
         if curr_inv is not None and curr_inv > 0:
             await medicines_coll.update_one({"_id": medicine_oid}, {"$inc": {"inventory": -1}})
 
+    # Auto-evaluate missed dose rules for caregiver alerts
+    try:
+        from app.services.caregiver_alert_service import CaregiverAlertService
+        from app.services.missed_dose_rules import MissedDoseRuleEvaluator
+        today_date = date.today()
+        rule_evaluator = MissedDoseRuleEvaluator()
+        eval_summary = await rule_evaluator.evaluate_patient_rules_for_date(user_oid, today_date)
+        if eval_summary.has_qualifications:
+            alert_service = CaregiverAlertService()
+            await alert_service.persist_for_active_caregivers(user_oid, eval_summary)
+    except Exception as exc:
+        logger.warning("Error evaluating caregiver alerts on activity recording: %s", exc)
+
     enriched = await _enrich_activity(new_doc)
     return ActivityResponse(**enriched)
 
@@ -299,15 +313,17 @@ async def get_activities(
 async def get_adherence_summary(
     startDate: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     endDate: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    clientDate: Optional[str] = Query(None, description="Optional client today date (YYYY-MM-DD)"),
+    referenceTime: Optional[str] = Query(None, description="Optional ISO reference datetime for evaluation"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """
     Compute patient adherence by matching expected schedule occurrences against
     recorded Taken/Skipped actions over the requested period.
-    The denominator strictly reflects real scheduled events.
+    The denominator strictly reflects real scheduled events that are due.
     """
     user_oid = to_object_id(current_user["id"])
-    today_str = date.today().isoformat()
+    today_str = clientDate or date.today().isoformat()
 
     start_str = startDate or today_str
     end_str = endDate or today_str
@@ -327,76 +343,19 @@ async def get_adherence_summary(
             detail="startDate cannot be after endDate.",
         )
 
-    # 1. Fetch patient's active schedules to compute expected occurrences
-    schedules_coll = get_schedules_collection()
-    schedules_cursor = schedules_coll.find({"userId": user_oid, "enabled": True})
-    active_schedules = await schedules_cursor.to_list(length=500)
+    ref_dt = None
+    if referenceTime:
+        try:
+            ref_dt = datetime.fromisoformat(referenceTime)
+        except ValueError:
+            pass
 
-    # 2. Compute total scheduled dose occurrences across the date range
-    total_scheduled = 0
-    curr_d = start_d
-    day_delta = timedelta(days=1)
-
-    while curr_d <= end_d:
-        curr_str = curr_d.isoformat()
-        weekday = curr_d.weekday()  # 0 = Mon, 6 = Sun
-        # MediTrack schema: 0 = Sun, 1 = Mon ... 6 = Sat
-        schema_day = (weekday + 1) % 7
-
-        for sched in active_schedules:
-            # Check duration bounds
-            s_start = sched.get("startDate")
-            s_end = sched.get("endDate")
-            if s_start and curr_str < s_start:
-                continue
-            if s_end and curr_str > s_end:
-                continue
-
-            freq = sched.get("frequencyType", "daily")
-            if freq == "daily":
-                total_scheduled += 1
-            elif freq == "weekly":
-                if schema_day in sched.get("daysOfWeek", []):
-                    total_scheduled += 1
-            elif freq == "custom":
-                if curr_str in sched.get("dates", []):
-                    total_scheduled += 1
-
-        curr_d += day_delta
-
-    # 3. Query recorded activities in this date range
-    activities_coll = get_activities_collection()
-    act_filter = {
-        "userId": user_oid,
-        "scheduledDate": {"$gte": start_str, "$lte": end_str},
-    }
-    activities = await activities_coll.find(act_filter).to_list(length=1000)
-
-    taken_count = sum(1 for a in activities if a.get("action") == ActionType.TAKEN.value)
-    skipped_count = sum(1 for a in activities if a.get("action") == ActionType.SKIPPED.value)
-    snoozed_count = sum(1 for a in activities if a.get("action") == ActionType.SNOOZED.value)
-
-    # In case user logged activities beyond scheduled (e.g. ad-hoc), ensure denominator is at least total recorded
-    effective_denominator = max(total_scheduled, taken_count + skipped_count)
-
-    adherence_pct = (
-        round((taken_count / effective_denominator) * 100, 1)
-        if effective_denominator > 0
-        else 0.0
+    return await calculate_adherence_summary(
+        patient_oid=user_oid,
+        start_date=start_d,
+        end_date=end_d,
+        reference_time=ref_dt,
     )
-    pending_count = max(0, effective_denominator - (taken_count + skipped_count))
-
-    return {
-        "startDate": start_str,
-        "endDate": end_str,
-        "totalScheduled": effective_denominator,
-        "takenCount": taken_count,
-        "skippedCount": skipped_count,
-        "snoozedCount": snoozed_count,
-        "pendingCount": pending_count,
-        "adherencePercentage": adherence_pct,
-        "formula": "Adherence = (Taken Doses / Total Scheduled Doses) * 100",
-    }
 
 
 @router.get(

@@ -42,8 +42,10 @@ from app.schemas.notification import (
 )
 from app.schemas.user import UserRole
 from app.services.caregiver_alert_service import CaregiverAlertService
+from app.services.missed_dose_rules import MissedDoseRuleEvaluator
 from app.services.missed_dose_service import MissedDoseService
 from app.services.occurrence_engine import get_reference_today, parse_date
+from app.services.adherence_service import calculate_adherence_summary
 from app.routers.calendar import build_calendar_response, build_streak_response
 from app.utils.mongo import document_to_dict, is_valid_object_id, to_object_id
 
@@ -112,6 +114,23 @@ async def create_or_reactivate_caregiver(
         "caregiverEmail": normalized_email,
     })
 
+    # Resolve authoritative caregiver details (supports email-only linking from registered account data)
+    final_name = (
+        caregiver_in.caregiverName.strip()
+        if caregiver_in.caregiverName and caregiver_in.caregiverName.strip()
+        else caregiver_user.get("fullName") or "Caregiver"
+    )
+    final_phone = (
+        caregiver_in.caregiverPhone.strip()
+        if caregiver_in.caregiverPhone and caregiver_in.caregiverPhone.strip()
+        else caregiver_user.get("phone") or ""
+    )
+    final_relationship = (
+        caregiver_in.relationship.strip()
+        if caregiver_in.relationship and caregiver_in.relationship.strip()
+        else "Caregiver"
+    )
+
     if existing_link:
         existing_status = existing_link.get("status")
         if existing_status == CaregiverStatus.ACTIVE.value or existing_status == "active":
@@ -128,9 +147,9 @@ async def create_or_reactivate_caregiver(
         # Reactivate revoked relationship in-place
         now = now_utc()
         update_fields = {
-            "caregiverName": caregiver_in.caregiverName.strip(),
-            "caregiverPhone": caregiver_in.caregiverPhone.strip(),
-            "relationship": caregiver_in.relationship.strip(),
+            "caregiverName": final_name,
+            "caregiverPhone": final_phone,
+            "relationship": final_relationship,
             "status": CaregiverStatus.ACTIVE.value,
             "updatedAt": now,
         }
@@ -151,10 +170,10 @@ async def create_or_reactivate_caregiver(
     # Create new active relationship
     doc = create_caregiver_document(
         patient_id=patient_oid,
-        caregiver_name=caregiver_in.caregiverName,
+        caregiver_name=final_name,
         caregiver_email=normalized_email,
-        caregiver_phone=caregiver_in.caregiverPhone,
-        relationship=caregiver_in.relationship,
+        caregiver_phone=final_phone,
+        relationship=final_relationship,
         status=CaregiverStatus.ACTIVE.value,
     )
     try:
@@ -393,13 +412,32 @@ async def get_patient_monitoring_summary(
     today_classified = await missed_service.get_classified_occurrences_for_date(patient_oid, today)
     missed_today = sum(1 for o in today_classified if o.is_missed)
 
-    # 4. Compute adherence percentage
-    if total_scheduled > 0:
-        adherence_pct = round((taken_today / total_scheduled) * 100.0, 1)
+    # 4. Compute adherence percentage using shared canonical service
+    adh_today = await calculate_adherence_summary(
+        patient_oid=patient_oid,
+        start_date=today,
+        end_date=today,
+    )
+    if adh_today["totalScheduled"] > 0:
+        adherence_pct = adh_today["adherencePercentage"]
+        total_scheduled = adh_today["totalScheduled"]
+        taken_today = adh_today["takenCount"]
+        skipped_today = adh_today["skippedCount"]
+        missed_today = adh_today["missedCount"]
     elif streak_res.totalTrackedDays > 0:
         adherence_pct = round((streak_res.totalAdherentDays / streak_res.totalTrackedDays) * 100.0, 1)
     else:
         adherence_pct = 100.0
+
+    # 4b. Evaluate missed dose alert rules and persist deduplicated alerts for active caregivers
+    try:
+        rule_evaluator = MissedDoseRuleEvaluator()
+        eval_summary = await rule_evaluator.evaluate_patient_rules_for_date(patient_oid, today)
+        if eval_summary.has_qualifications:
+            alert_service = CaregiverAlertService()
+            await alert_service.persist_for_active_caregivers(patient_oid, eval_summary)
+    except Exception as exc:
+        logger.warning("Error evaluating caregiver alerts in monitoring summary for patient %s: %s", patient_oid, exc)
 
     # 5. Fetch recent alerts for this caregiver and patient
     notif_coll = get_notifications_collection()
@@ -474,6 +512,28 @@ async def list_caregiver_alerts(
         if not is_valid_object_id(patientId):
             return []
         query["patientId"] = to_object_id(patientId)
+
+    # Auto-evaluate missed dose alert qualifications for caregiver's active linked patient(s)
+    try:
+        caregivers_coll = get_caregivers_collection()
+        link_query: Dict[str, Any] = {
+            "caregiverEmail": current_user.get("email", "").strip().lower(),
+            "status": "active",
+        }
+        if patientId and is_valid_object_id(patientId):
+            link_query["patientId"] = to_object_id(patientId)
+
+        rule_evaluator = MissedDoseRuleEvaluator()
+        alert_service = CaregiverAlertService()
+        today = date.today()
+        async for link in caregivers_coll.find(link_query):
+            pt_id = link.get("patientId")
+            if pt_id:
+                eval_summary = await rule_evaluator.evaluate_patient_rules_for_date(pt_id, today)
+                if eval_summary.has_qualifications:
+                    await alert_service.persist_for_active_caregivers(pt_id, eval_summary)
+    except Exception as exc:
+        logger.warning("Error auto-evaluating caregiver alerts in list_caregiver_alerts: %s", exc)
 
     notif_coll = get_notifications_collection()
     cursor = notif_coll.find(query).sort("createdAt", pymongo.DESCENDING).limit(limit)

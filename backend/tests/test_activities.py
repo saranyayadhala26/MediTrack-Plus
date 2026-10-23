@@ -72,7 +72,7 @@ async def setup_patient_medicine_schedule(client: AsyncClient):
             "dosageUnit": "mg",
             "frequency": "Daily",
             "startDate": "2026-09-01",
-            "endDate": "2026-10-01",
+            "endDate": "2026-12-31",
             "inventory": 10,
             "refillThreshold": 3,
         },
@@ -90,7 +90,7 @@ async def setup_patient_medicine_schedule(client: AsyncClient):
             "time": "08:00",
             "frequencyType": "daily",
             "startDate": today_str,
-            "endDate": "2026-10-01",
+            "endDate": "2026-12-31",
         },
         headers=headers,
     )

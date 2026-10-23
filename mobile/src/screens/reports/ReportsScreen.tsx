@@ -1,22 +1,9 @@
 /**
- * Production Reports Screen for MediTrack+ (Phase 11 Step 9).
- *
- * Provides weekly and monthly medication adherence reports and clinical PDF export:
- * - Senior-friendly accessible design with high contrast and WCAG 48dp touch targets.
- * - Weekly | Monthly segmented period selector.
- * - Role-based authorization:
- *     - Patients view their own reports (JWT-derived identity).
- *     - Caregivers view actively linked patients with linked-patient selector.
- *     - Revocation safety: clears sensitive report data immediately on 403.
- * - Primary adherence percentage card with 5-state breakdown (Taken, Skipped, Missed, Snoozed, Pending).
- * - Streak metrics evaluated as of report endDate.
- * - Per-medicine breakdown list.
- * - Day-by-day occurrence log.
- * - In-memory PDF download to local filesystem + native PDF sharing (expo-sharing).
- * - Automated email report guidance consistent with backend notification preferences.
+ * Medication Adherence Reports Screen for MediTrack+
+ * Redesigned to match the finalized MediTrack+ UI design reference (page 25 of ui.pdf).
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -31,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getLinkedPatients } from "../../api/caregivers";
 import {
   downloadMonthlyReportPdf,
@@ -43,35 +31,145 @@ import {
   getWeeklyReport,
   shareReportPdf,
 } from "../../api/reports";
-import { Button } from "../../components/common/Button";
-import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
-import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { colors, spacing } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import {
   LinkedPatient,
   MedicationReportResponse,
+  ReportMedicineBreakdown,
   ReportPeriodType,
 } from "../../types";
 
-interface ReportsScreenProps {
+export interface ReportsScreenProps {
   onBack?: () => void;
   initialPatientId?: string;
   onNavigateToProfile?: () => void;
+  onNavigateToMedicines?: () => void;
+  onNavigateToCalendar?: () => void;
+  hideBottomNav?: boolean;
 }
+
+type PeriodFilterTab = "7 Days" | "30 Days" | "Custom";
+type SortOption = "high-to-low" | "low-to-high" | "alphabetical";
+
+const PERIOD_TABS: PeriodFilterTab[] = ["7 Days", "30 Days", "Custom"];
+
+const PILL_COLORS = [
+  { bg: "#E0F2FE", color: "#0284C7" }, // Blue
+  { bg: "#DCFCE7", color: "#16A34A" }, // Green
+  { bg: "#FEE2E2", color: "#DC2626" }, // Red
+  { bg: "#F3E8FF", color: "#9333EA" }, // Purple
+  { bg: "#FEF3C7", color: "#D97706" }, // Amber
+  { bg: "#CCFBF1", color: "#0D9488" }, // Teal
+];
+
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function formatReportDate(dateStr?: string): string {
+  if (!dateStr) return "";
+  try {
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length !== 3) return dateStr;
+    const [y, m, d] = parts;
+    const dayStr = String(d).padStart(2, "0");
+    const monthStr = SHORT_MONTHS[m - 1] || "";
+    return `${dayStr} ${monthStr} ${y}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatDayName(dateStr?: string): string {
+  if (!dateStr) return "";
+  try {
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length !== 3) return "";
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    const dayIndex = dateObj.getDay();
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return days[dayIndex] || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Circular progress ring for adherence percentage in Report Summary.
+ */
+const AdherenceProgressRing: React.FC<{ percentage: number; size?: number }> = ({
+  percentage,
+  size = 112,
+}) => {
+  const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
+
+  const topColor = clamped > 0 ? "#0D9488" : "#E2E8F0";
+  const rightColor = clamped >= 25 ? "#0D9488" : "#E2E8F0";
+  const bottomColor = clamped >= 50 ? "#0D9488" : "#E2E8F0";
+  const leftColor = clamped >= 75 ? "#0D9488" : "#E2E8F0";
+
+  return (
+    <View
+      style={[
+        styles.progressRingWrapper,
+        { width: size, height: size, borderRadius: size / 2 },
+      ]}
+    >
+      <View
+        style={[
+          styles.progressRingCircle,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderTopColor: topColor,
+            borderRightColor: rightColor,
+            borderBottomColor: bottomColor,
+            borderLeftColor: leftColor,
+          },
+        ]}
+      >
+        <View style={styles.progressRingInner}>
+          <Text style={styles.progressPercentageText}>{clamped}%</Text>
+          <Text style={styles.progressLabelText}>Adherence</Text>
+        </View>
+      </View>
+    </View>
+  );
+};
 
 export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   onBack,
   initialPatientId,
   onNavigateToProfile,
+  onNavigateToMedicines,
+  onNavigateToCalendar,
+  hideBottomNav = false,
 }) => {
   const { user } = useAuth();
   const isCaregiver = user?.role === "caregiver";
 
-  // Navigation / Period state
+  // Period state
+  const [selectedPeriodTab, setSelectedPeriodTab] = useState<PeriodFilterTab>("7 Days");
   const [period, setPeriod] = useState<ReportPeriodType>("weekly");
+
+  // Medication sort state
+  const [sortOption, setSortOption] = useState<SortOption>("high-to-low");
 
   // Caregiver Patient state
   const [linkedPatients, setLinkedPatients] = useState<LinkedPatient[]>([]);
@@ -104,7 +202,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         if (!isMounted) return;
         setLinkedPatients(patients || []);
         if (patients && patients.length > 0) {
-          // If initialPatientId is provided and valid, keep it; otherwise select the first patient
           if (!selectedPatientId || !patients.some((p) => p.patientId === selectedPatientId)) {
             setSelectedPatientId(patients[0].patientId);
           }
@@ -141,7 +238,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
   // 2. Fetch Report Data
   const fetchReport = useCallback(async () => {
-    // If caregiver has no patients, stop
     if (isCaregiver && !selectedPatientId) {
       setReport(null);
       setIsLoadingReport(false);
@@ -152,7 +248,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     setError(null);
     setIsRevoked(false);
     setPdfSuccessMessage(null);
-    setDownloadedPdfUri(null);
 
     try {
       let data: MedicationReportResponse;
@@ -174,7 +269,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       console.error("[ReportsScreen] Error fetching report:", err);
       if (err?.response?.status === 403) {
         setIsRevoked(true);
-        setReport(null); // Never retain or expose sensitive patient report data after revocation
+        setReport(null);
         setError(
           "Access Denied: You do not have an active caregiver relationship with this patient, or access has been revoked."
         );
@@ -205,7 +300,28 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     fetchReport();
   };
 
-  // 3. Handle PDF Download
+  // Switch Period Tab
+  const handlePeriodTabSelect = (tab: PeriodFilterTab) => {
+    setSelectedPeriodTab(tab);
+    if (tab === "7 Days") {
+      setPeriod("weekly");
+    } else if (tab === "30 Days") {
+      setPeriod("monthly");
+    } else {
+      // Custom: toggle between weekly and monthly or show prompt
+      Alert.alert(
+        "Custom Report Period",
+        "Select a standard reporting window or custom period.",
+        [
+          { text: "7 Days (Weekly)", onPress: () => { setSelectedPeriodTab("7 Days"); setPeriod("weekly"); } },
+          { text: "30 Days (Monthly)", onPress: () => { setSelectedPeriodTab("30 Days"); setPeriod("monthly"); } },
+          { text: "Cancel", style: "cancel" },
+        ]
+      );
+    }
+  };
+
+  // 3. Handle PDF Download & Share
   const handleDownloadPdf = async () => {
     if (!report) return;
     setIsDownloadingPdf(true);
@@ -229,9 +345,8 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
       setDownloadedPdfUri(fileUri);
       const filename = fileUri.split("/").pop() || "Report.pdf";
-      setPdfSuccessMessage(`Report saved locally: ${filename}`);
+      setPdfSuccessMessage(`Report generated: ${filename}`);
 
-      // Prompt user to open/share immediately
       Alert.alert(
         "Report PDF Ready",
         `Your clinical adherence report has been successfully generated and saved to your device.`,
@@ -253,11 +368,11 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }
   };
 
-  // 4. Handle PDF Share / Open
   const handleSharePdf = async (uriOverride?: string) => {
     const targetUri = uriOverride || downloadedPdfUri;
     if (!targetUri) {
-      Alert.alert("No PDF Downloaded", "Please download the PDF report first.");
+      // If no PDF generated yet, generate one first
+      handleDownloadPdf();
       return;
     }
 
@@ -266,7 +381,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       if (!success) {
         Alert.alert(
           "Sharing Unavailable",
-          `Sharing is not supported on this platform, but your PDF has been safely saved at:\n${targetUri}`
+          `Your report PDF is stored safely at:\n${targetUri}`
         );
       }
     } catch (err: any) {
@@ -275,620 +390,534 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }
   };
 
-  // 5. Handle Email Report Information
-  const handleEmailReportPress = () => {
-    Alert.alert(
-      "Automated Email Reports",
-      "Medication adherence reports are automatically sent to registered accounts based on your notification preferences.\n\nYou can configure weekly and monthly email reports in your Profile Settings, or share the clinical PDF report immediately.",
-      [
-        { text: "Close", style: "cancel" },
-        ...(onNavigateToProfile && !isCaregiver
-          ? [
-              {
-                text: "Notification Settings",
-                onPress: onNavigateToProfile,
-              },
-            ]
-          : []),
-        {
-          text: "Share PDF Now",
-          onPress: () => {
-            if (downloadedPdfUri) {
-              handleSharePdf();
-            } else {
-              handleDownloadPdf();
-            }
+  const handleViewPreviousReports = () => {
+    if (downloadedPdfUri) {
+      Alert.alert(
+        "Previous Report Available",
+        `A clinical report PDF was previously generated:\n${downloadedPdfUri.split("/").pop()}`,
+        [
+          { text: "Close", style: "cancel" },
+          {
+            text: "Share / Open",
+            onPress: () => handleSharePdf(downloadedPdfUri),
           },
-        },
-      ]
-    );
-  };
-
-  // Format Helper
-  const formatDateLabel = (isoDate?: string): string => {
-    if (!isoDate) return "";
-    try {
-      const [y, m, d] = isoDate.split("-").map(Number);
-      const dateObj = new Date(y, m - 1, d);
-      return dateObj.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    } catch {
-      return isoDate;
+          {
+            text: "Generate Fresh",
+            onPress: handleDownloadPdf,
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        "No Previous Reports Stored Locally",
+        "You can generate a fresh clinical report for the current period now.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Generate Report", onPress: handleDownloadPdf },
+        ]
+      );
     }
   };
 
-  const formatDayName = (isoDate?: string): string => {
-    if (!isoDate) return "";
-    try {
-      const [y, m, d] = isoDate.split("-").map(Number);
-      const dateObj = new Date(y, m - 1, d);
-      return dateObj.toLocaleDateString("en-US", { weekday: "short" });
-    } catch {
-      return "";
+  // Sorted Medicines
+  const sortedMedicines = useMemo(() => {
+    if (!report?.medicines) return [];
+    const list = [...report.medicines];
+    if (sortOption === "high-to-low") {
+      return list.sort((a, b) => b.adherencePercentage - a.adherencePercentage);
+    }
+    if (sortOption === "low-to-high") {
+      return list.sort((a, b) => a.adherencePercentage - b.adherencePercentage);
+    }
+    return list.sort((a, b) => a.medicineName.localeCompare(b.medicineName));
+  }, [report?.medicines, sortOption]);
+
+  const toggleSortOption = () => {
+    if (sortOption === "high-to-low") {
+      setSortOption("low-to-high");
+    } else if (sortOption === "low-to-high") {
+      setSortOption("alphabetical");
+    } else {
+      setSortOption("high-to-low");
     }
   };
+
+  const sortLabel =
+    sortOption === "high-to-low"
+      ? "Adherence (High to Low)"
+      : sortOption === "low-to-high"
+      ? "Adherence (Low to High)"
+      : "Alphabetical";
+
+  // Trend data points (up to 7 days for the chart)
+  const trendDays = useMemo(() => {
+    if (!report?.dailySummaries || report.dailySummaries.length === 0) {
+      return [];
+    }
+    // Take the last 7 daily summaries
+    const slice = report.dailySummaries.slice(-7);
+    return slice.map((day) => ({
+      date: day.date,
+      dayName: formatDayName(day.date),
+      percentage: Math.round(day.adherencePercentage),
+      hasScheduledDoses: day.hasScheduledDoses,
+    }));
+  }, [report?.dailySummaries]);
+
+  // Derived Summary Counts
+  const adherencePercentage = report?.summary?.adherencePercentage ?? 0;
+  const totalScheduled = report?.summary?.totalScheduled ?? 0;
+  const takenCount = report?.summary?.takenCount ?? 0;
+  const skippedCount = (report?.summary?.skippedCount ?? 0) + (report?.summary?.missedCount ?? 0);
+  const pendingCount = report?.summary?.pendingCount ?? 0;
+
+  const progressTitle =
+    adherencePercentage >= 80
+      ? "Good progress!"
+      : adherencePercentage >= 50
+      ? "Steady progress"
+      : "Needs attention";
+
+  const progressMessage =
+    adherencePercentage >= 80
+      ? "You've taken most of your scheduled doses this period."
+      : adherencePercentage >= 50
+      ? "Keep taking your doses consistently to stay on track."
+      : "Try setting reminder alarms to improve adherence.";
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Screen Header */}
+      {/* 1. Header */}
       <View style={styles.header}>
-        <View style={styles.headerRow}>
-          {onBack && (
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={onBack}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <Text style={styles.backButtonText}>← Back</Text>
-            </TouchableOpacity>
-          )}
-          <View style={styles.titleContainer}>
-            <Text style={styles.headerTitle}>
-              {isCaregiver ? "Adherence Reports" : "Reports"}
-            </Text>
-            <Text style={styles.headerSubtitle}>
-              {isCaregiver
-                ? "Monitored patient clinical adherence"
-                : "Medication adherence overview"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Period Selector (Weekly | Monthly) */}
-        <View
-          style={styles.segmentedContainer}
-          accessibilityRole="tablist"
-          accessibilityLabel="Report period selection"
-        >
+        {onBack ? (
           <TouchableOpacity
-            style={[
-              styles.segmentButton,
-              period === "weekly" && styles.segmentButtonActive,
-            ]}
-            onPress={() => setPeriod("weekly")}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: period === "weekly" }}
-            accessibilityLabel="Weekly Report"
+            onPress={onBack}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text
-              style={[
-                styles.segmentText,
-                period === "weekly" && styles.segmentTextActive,
-              ]}
-            >
-              📅 Weekly
-            </Text>
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.segmentButton,
-              period === "monthly" && styles.segmentButtonActive,
-            ]}
-            onPress={() => setPeriod("monthly")}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: period === "monthly" }}
-            accessibilityLabel="Monthly Report"
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                period === "monthly" && styles.segmentTextActive,
-              ]}
-            >
-              🗓️ Monthly
-            </Text>
-          </TouchableOpacity>
+        ) : null}
+        <View style={styles.headerTitleCol}>
+          <Text style={styles.headerTitle}>Reports</Text>
+          <Text style={styles.headerSubtitle}>Review your medication adherence.</Text>
         </View>
+      </View>
 
-        {/* Caregiver Patient Selector */}
-        {isCaregiver && (
-          <View style={styles.caregiverSelectorContainer}>
-            <Text style={styles.caregiverSelectorLabel}>Select Monitored Patient:</Text>
-            {isLoadingPatients ? (
-              <ActivityIndicator size="small" color={colors.primaryLight} style={{ marginVertical: 8 }} />
-            ) : linkedPatients.length === 0 ? (
-              <Text style={styles.noPatientsText}>No linked patients available</Text>
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.patientPillRow}
-              >
-                {linkedPatients.map((p) => {
-                  const isSelected = p.patientId === selectedPatientId;
-                  return (
-                    <TouchableOpacity
-                      key={p.patientId}
+      {/* Caregiver Patient Selector (if Caregiver) */}
+      {isCaregiver && (
+        <View style={styles.caregiverSelectorContainer}>
+          <Text style={styles.caregiverSelectorLabel}>Monitored Patient:</Text>
+          {isLoadingPatients ? (
+            <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 4 }} />
+          ) : linkedPatients.length === 0 ? (
+            <Text style={styles.noPatientsText}>No linked patients available</Text>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.patientPillRow}
+            >
+              {linkedPatients.map((p) => {
+                const isSelected = p.patientId === selectedPatientId;
+                return (
+                  <TouchableOpacity
+                    key={p.patientId}
+                    style={[
+                      styles.patientPill,
+                      isSelected && styles.patientPillSelected,
+                    ]}
+                    onPress={() => setSelectedPatientId(p.patientId)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`Select patient ${p.fullName}`}
+                  >
+                    <Text
                       style={[
-                        styles.patientPill,
-                        isSelected && styles.patientPillSelected,
+                        styles.patientPillText,
+                        isSelected && styles.patientPillTextSelected,
                       ]}
-                      onPress={() => setSelectedPatientId(p.patientId)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isSelected }}
-                      accessibilityLabel={`Select patient ${p.fullName}`}
                     >
-                      <Text
-                        style={[
-                          styles.patientPillText,
-                          isSelected && styles.patientPillTextSelected,
-                        ]}
-                      >
-                        👤 {p.fullName} ({p.relationship})
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
+                      {p.fullName} ({p.relationship})
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
+      {/* 2. Report Period Control Header */}
+      <View style={styles.periodControlContainer}>
+        <View style={styles.periodRow}>
+          <Text style={styles.periodSectionLabel}>Report Period</Text>
+          <View style={styles.periodPillGroup}>
+            {PERIOD_TABS.map((tab) => {
+              const isSelected = selectedPeriodTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.periodPill,
+                    isSelected ? styles.periodPillSelected : styles.periodPillUnselected,
+                  ]}
+                  onPress={() => handlePeriodTabSelect(tab)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={`${tab} period`}
+                >
+                  <Text
+                    style={[
+                      styles.periodPillText,
+                      isSelected ? styles.periodPillTextSelected : styles.periodPillTextUnselected,
+                    ]}
+                  >
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
+        </View>
+
+        {/* 3. Report Date Range Box */}
+        {report && (
+          <TouchableOpacity
+            style={styles.dateRangeBox}
+            onPress={() => handlePeriodTabSelect("Custom")}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Select date range"
+          >
+            <Ionicons
+              name="calendar-outline"
+              size={16}
+              color={colors.textSecondary}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.dateRangeText}>
+              {formatReportDate(report.startDate)} - {formatReportDate(report.endDate)}
+            </Text>
+            <Ionicons
+              name="chevron-down"
+              size={16}
+              color={colors.textSecondary}
+              style={{ marginLeft: "auto" }}
+            />
+          </TouchableOpacity>
         )}
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
             colors={[colors.primary]}
+            tintColor={colors.primary}
           />
         }
       >
         {/* Loading State */}
-        {isLoadingReport && (
-          <LoadingState message="Preparing your adherence report..." style={styles.stateContainer} />
-        )}
-
-        {/* Error / Revocation State */}
-        {!isLoadingReport && error && (
-          <View style={styles.errorWrapper}>
-            {isRevoked ? (
-              <Card style={styles.revokedCard}>
-                <Text style={styles.revokedTitle}>⚠️ Access Revoked</Text>
-                <Text style={styles.revokedMessage}>{error}</Text>
-                <Text style={styles.revokedHint}>
-                  The patient has disconnected caregiver monitoring access. Stale clinical data has been safely cleared.
-                </Text>
-              </Card>
-            ) : (
-              <ErrorState
-                title="Unable to Load Report"
-                message={error}
-                onRetry={fetchReport}
-              />
-            )}
+        {isLoadingReport && !isRefreshing && (
+          <View style={styles.loaderBox}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Loading adherence report...</Text>
           </View>
         )}
 
-        {/* Caregiver Empty State (No Patients) */}
-        {!isLoadingReport && !error && isCaregiver && linkedPatients.length === 0 && (
+        {/* Error / Revoked State */}
+        {!isLoadingReport && error && (
+          <View style={styles.errorWrapper}>
+            <Ionicons
+              name="alert-circle-outline"
+              size={20}
+              color={colors.danger}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        {/* Empty State if no report */}
+        {!isLoadingReport && !error && !report && (
           <EmptyState
-            title="No Monitored Patients"
-            description="You do not have any actively linked patients. Once a patient adds you as a caregiver, their adherence reports will appear here."
+            title="No Report Available"
+            description="There are currently no report records available for the selected period."
           />
         )}
 
-        {/* Main Report Content */}
+        {/* Main Content */}
         {!isLoadingReport && !error && report && (
           <>
-            {/* Report Metadata Banner */}
-            <Card style={styles.metaCard}>
-              <View style={styles.metaHeaderRow}>
-                <View style={styles.periodBadge}>
-                  <Text style={styles.periodBadgeText}>
-                    {report.reportType === "weekly" ? "📅 WEEKLY REPORT" : "🗓️ MONTHLY REPORT"}
-                  </Text>
-                </View>
-                <Text style={styles.metaGenerated}>
-                  Updated: {new Date(report.generatedAt).toLocaleDateString()}
-                </Text>
-              </View>
-
-              <Text style={styles.metaDateRange}>
-                {period === "weekly" ? "Weekly" : "Monthly"} {formatDateLabel(report.startDate)} — {formatDateLabel(report.endDate)}
-              </Text>
-
-              <View style={styles.metaPatientRow}>
-                <Text style={styles.metaPatientLabel}>Patient:</Text>
-                <Text style={styles.metaPatientName}>{report.patientName}</Text>
-              </View>
-            </Card>
-
-            {/* Primary Adherence Summary Card */}
-            <Card style={styles.adherenceCard}>
-              <Text style={styles.cardHeaderTitle}>Adherence Summary</Text>
-
-              {report.summary.hasScheduledDoses ? (
-                <View style={styles.adherenceScoreRow}>
-                  <View
-                    style={[
-                      styles.adherenceScoreCircle,
-                      report.summary.adherencePercentage >= 80
-                        ? styles.scoreHigh
-                        : report.summary.adherencePercentage >= 50
-                        ? styles.scoreMedium
-                        : styles.scoreLow,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.adherenceScoreText,
-                        report.summary.adherencePercentage >= 80
-                          ? styles.scoreHighText
-                          : report.summary.adherencePercentage >= 50
-                          ? styles.scoreMediumText
-                          : styles.scoreLowText,
-                      ]}
-                    >
-                      {report.summary.adherencePercentage}%
-                    </Text>
-                    <Text style={styles.adherenceScoreLabel}>Adherence</Text>
+            {/* 4. Report Summary Card */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Report Summary</Text>
+              <View style={styles.summaryCard}>
+                {/* Top Part: Progress Ring & Status Message */}
+                <View style={styles.summaryTopRow}>
+                  <View style={styles.ringCol}>
+                    <AdherenceProgressRing percentage={adherencePercentage} />
                   </View>
 
-                  <View style={styles.adherenceMetricsOverview}>
-                    <Text style={styles.overviewHeadline}>
-                      {report.summary.adherencePercentage >= 80
-                        ? "🌟 Excellent Adherence"
-                        : report.summary.adherencePercentage >= 50
-                        ? "⚖️ Moderate Adherence"
-                        : "⚠️ Needs Attention"}
-                    </Text>
-                    <Text style={styles.overviewSubtext}>
-                      {report.summary.takenCount} of {report.summary.totalScheduled} doses taken on schedule.
-                    </Text>
+                  <View style={styles.summaryMessageCol}>
+                    <Text style={styles.progressTitleText}>{progressTitle}</Text>
+                    <Text style={styles.progressSubtitleText}>{progressMessage}</Text>
                   </View>
                 </View>
-              ) : (
-                <View style={styles.adherenceScoreRow}>
-                  <View style={[styles.adherenceScoreCircle, styles.scoreNone]}>
-                    <Text style={[styles.adherenceScoreText, styles.scoreNoneText]}>
-                      N/A
+
+                {/* Bottom Part: 4 Metric Tiles */}
+                <View style={styles.metricTilesRow}>
+                  {/* Scheduled */}
+                  <View style={[styles.metricTile, styles.tileScheduled]}>
+                    <View style={[styles.metricIconCircle, { backgroundColor: "#475569" }]}>
+                      <Ionicons name="calendar-outline" size={12} color="#FFFFFF" />
+                    </View>
+                    <Text style={[styles.metricNumberText, { color: "#1E293B" }]}>
+                      {totalScheduled}
                     </Text>
-                    <Text style={styles.adherenceScoreLabel}>No Doses</Text>
+                    <Text style={[styles.metricLabelText, { color: "#1E293B" }]}>Scheduled</Text>
+                    <Text style={styles.metricSublabelText}>Total doses</Text>
                   </View>
 
-                  <View style={styles.adherenceMetricsOverview}>
-                    <Text style={styles.overviewHeadline}>ℹ️ No Scheduled Doses</Text>
-                    <Text style={styles.overviewSubtext}>
-                      No medication doses were scheduled during this reporting period ({formatDateLabel(report.startDate)} — {formatDateLabel(report.endDate)}).
+                  {/* Taken */}
+                  <View style={[styles.metricTile, styles.tileTaken]}>
+                    <View style={[styles.metricIconCircle, { backgroundColor: "#16A34A" }]}>
+                      <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+                    </View>
+                    <Text style={[styles.metricNumberText, { color: "#16A34A" }]}>
+                      {takenCount}
                     </Text>
+                    <Text style={[styles.metricLabelText, { color: "#16A34A" }]}>Taken</Text>
+                    <Text style={styles.metricSublabelText}>Completed doses</Text>
+                  </View>
+
+                  {/* Skipped */}
+                  <View style={[styles.metricTile, styles.tileSkipped]}>
+                    <View style={[styles.metricIconCircle, { backgroundColor: "#DC2626" }]}>
+                      <Ionicons name="close" size={13} color="#FFFFFF" />
+                    </View>
+                    <Text style={[styles.metricNumberText, { color: "#DC2626" }]}>
+                      {skippedCount}
+                    </Text>
+                    <Text style={[styles.metricLabelText, { color: "#DC2626" }]}>Skipped</Text>
+                    <Text style={styles.metricSublabelText}>Missed doses</Text>
+                  </View>
+
+                  {/* Pending */}
+                  <View style={[styles.metricTile, styles.tilePending]}>
+                    <View style={[styles.metricIconCircle, { backgroundColor: "#D97706" }]}>
+                      <Ionicons name="time-outline" size={13} color="#FFFFFF" />
+                    </View>
+                    <Text style={[styles.metricNumberText, { color: "#D97706" }]}>
+                      {pendingCount}
+                    </Text>
+                    <Text style={[styles.metricLabelText, { color: "#D97706" }]}>Pending</Text>
+                    <Text style={styles.metricSublabelText}>Upcoming doses</Text>
                   </View>
                 </View>
-              )}
-
-              {/* 6-Metric Breakdown Grid */}
-              <View style={styles.statsGrid}>
-                <View style={[styles.statBox, styles.statBoxTotal]}>
-                  <Text style={styles.statBoxIcon}>📅</Text>
-                  <Text style={styles.statBoxNumber}>{report.summary.totalScheduled}</Text>
-                  <Text style={styles.statBoxLabel}>Scheduled</Text>
-                </View>
-
-                <View style={[styles.statBox, styles.statBoxTaken]}>
-                  <Text style={styles.statBoxIcon}>✅</Text>
-                  <Text style={[styles.statBoxNumber, { color: colors.taken }]}>
-                    {report.summary.takenCount}
-                  </Text>
-                  <Text style={styles.statBoxLabel}>Taken</Text>
-                </View>
-
-                <View style={[styles.statBox, styles.statBoxSkipped]}>
-                  <Text style={styles.statBoxIcon}>⏭️</Text>
-                  <Text style={[styles.statBoxNumber, { color: colors.skipped }]}>
-                    {report.summary.skippedCount}
-                  </Text>
-                  <Text style={styles.statBoxLabel}>Skipped</Text>
-                </View>
-
-                <View style={[styles.statBox, styles.statBoxMissed]}>
-                  <Text style={styles.statBoxIcon}>❌</Text>
-                  <Text style={[styles.statBoxNumber, { color: colors.error }]}>
-                    {report.summary.missedCount}
-                  </Text>
-                  <Text style={styles.statBoxLabel}>Missed</Text>
-                </View>
-
-                <View style={[styles.statBox, styles.statBoxSnoozed]}>
-                  <Text style={styles.statBoxIcon}>⏰</Text>
-                  <Text style={[styles.statBoxNumber, { color: colors.snoozed }]}>
-                    {report.summary.unresolvedSnoozedCount}
-                  </Text>
-                  <Text style={styles.statBoxLabel}>Snoozed</Text>
-                </View>
-
-                <View style={[styles.statBox, styles.statBoxPending]}>
-                  <Text style={styles.statBoxIcon}>⏳</Text>
-                  <Text style={[styles.statBoxNumber, { color: colors.due }]}>
-                    {report.summary.pendingCount}
-                  </Text>
-                  <Text style={styles.statBoxLabel}>Pending</Text>
-                </View>
               </View>
-            </Card>
+            </View>
 
-            {/* PDF Export & Email Actions */}
-            <Card style={styles.actionsCard}>
-              <Text style={styles.cardHeaderTitle}>Report Actions</Text>
-              <Text style={styles.actionsSubtitle}>
-                Download formatted clinical PDF for physician visits or insurance verification.
-              </Text>
-
-              {pdfSuccessMessage && (
-                <View style={styles.pdfSuccessBox}>
-                  <Text style={styles.pdfSuccessText}>✓ {pdfSuccessMessage}</Text>
-                </View>
-              )}
-
-              {downloadedPdfUri ? (
-                <View style={styles.singleActionButtonContainer}>
-                  <Button
-                    title="📤 Share PDF Report"
-                    onPress={() => handleSharePdf()}
-                    variant="primary"
-                    style={styles.fullWidthButton}
-                  />
-                  <TouchableOpacity
-                    onPress={handleDownloadPdf}
-                    disabled={isDownloadingPdf}
-                    style={styles.reDownloadButton}
-                    accessibilityRole="button"
-                    accessibilityLabel="Re-download PDF"
-                  >
-                    <Text style={styles.reDownloadButtonText}>
-                      {isDownloadingPdf ? "Re-generating PDF..." : "📥 Re-download PDF"}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.actionButtonsRow}>
-                  <Button
-                    title={isDownloadingPdf ? "Generating PDF..." : "📥 Download PDF"}
-                    onPress={handleDownloadPdf}
-                    variant="primary"
-                    loading={isDownloadingPdf}
-                    disabled={isDownloadingPdf}
-                    style={styles.actionButton}
-                  />
-
-                  <Button
-                    title="📧 Email Report"
-                    onPress={handleEmailReportPress}
-                    variant="outline"
-                    disabled={isDownloadingPdf}
-                    style={styles.actionButton}
-                  />
-                </View>
-              )}
-            </Card>
-
-            {/* Historical Streak Card */}
-            <Card style={styles.streakCard}>
-              <View style={styles.streakHeaderRow}>
-                <Text style={styles.cardHeaderTitle}>Adherence Streaks</Text>
-                <Text style={styles.streakEvalDate}>
-                  As of {formatDateLabel(report.streak.evaluatedDate)}
-                </Text>
-              </View>
-
-              <View style={styles.streakMetricsRow}>
-                <View style={styles.streakBox}>
-                  <Text style={styles.streakEmoji}>🔥</Text>
-                  <Text style={styles.streakNumber}>{report.streak.currentStreak}</Text>
-                  <Text style={styles.streakLabel}>Current Streak</Text>
-                </View>
-
-                <View style={styles.streakBox}>
-                  <Text style={styles.streakEmoji}>🏆</Text>
-                  <Text style={styles.streakNumber}>{report.streak.longestStreak}</Text>
-                  <Text style={styles.streakLabel}>Best Streak</Text>
-                </View>
-
-                <View style={styles.streakBox}>
-                  <Text style={styles.streakEmoji}>⭐</Text>
-                  <Text style={styles.streakNumber}>{report.streak.totalAdherentDays}</Text>
-                  <Text style={styles.streakLabel}>Adherent Days</Text>
-                </View>
-
-                <View style={styles.streakBox}>
-                  <Text style={styles.streakEmoji}>📊</Text>
-                  <Text style={styles.streakNumber}>{report.streak.totalTrackedDays}</Text>
-                  <Text style={styles.streakLabel}>Tracked Days</Text>
-                </View>
-              </View>
-
-              {report.streak.lastAdherentDate && (
-                <Text style={styles.lastAdherentNote}>
-                  Last fully adherent date: {formatDateLabel(report.streak.lastAdherentDate)}
-                </Text>
-              )}
-            </Card>
-
-            {/* Medicine Breakdown Section */}
-            <Card style={styles.sectionCard}>
+            {/* 5. Medication Breakdown Section */}
+            <View style={styles.sectionContainer}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.cardHeaderTitle}>Medication Breakdown</Text>
-                <Text style={styles.sectionItemCount}>
-                  {report.medicines.length} {report.medicines.length === 1 ? "medication" : "medications"}
-                </Text>
+                <Text style={styles.sectionTitle}>Medication Breakdown</Text>
+                <TouchableOpacity
+                  style={styles.sortDropdownButton}
+                  onPress={toggleSortOption}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sort medications: currently ${sortLabel}`}
+                >
+                  <Text style={styles.sortDropdownText}>{sortLabel}</Text>
+                  <Ionicons name="chevron-down" size={14} color="#64748B" style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
               </View>
 
-              {report.medicines.length === 0 ? (
-                <Text style={styles.emptySectionText}>
-                  No medications were active during this reporting period.
-                </Text>
-              ) : (
-                report.medicines.map((med) => (
-                  <View key={med.medicineId} style={styles.medicineItem}>
-                    <View style={styles.medicineItemHeader}>
-                      <View style={styles.medicineInfoCol}>
-                        <Text style={styles.medicineName}>{med.medicineName}</Text>
-                        <Text style={styles.medicineDosage}>
-                          {med.dosage} ({med.dosageUnit})
-                        </Text>
-                      </View>
+              <View style={styles.medicationsListCard}>
+                {sortedMedicines.length === 0 ? (
+                  <Text style={styles.emptyMedicationsText}>
+                    No medications were active during this reporting period.
+                  </Text>
+                ) : (
+                  sortedMedicines.map((med, idx) => {
+                    const themeColor = PILL_COLORS[idx % PILL_COLORS.length];
+                    const medPct = Math.max(0, Math.min(100, Math.round(med.adherencePercentage)));
+
+                    return (
                       <View
+                        key={med.medicineId}
                         style={[
-                          styles.medAdherenceBadge,
-                          med.hasScheduledDoses && med.adherencePercentage >= 80
-                            ? styles.scoreHigh
-                            : med.hasScheduledDoses && med.adherencePercentage >= 50
-                            ? styles.scoreMedium
-                            : med.hasScheduledDoses
-                            ? styles.scoreLow
-                            : styles.scoreNone,
+                          styles.medicineRow,
+                          idx < sortedMedicines.length - 1 && styles.medicineRowBorder,
                         ]}
                       >
-                        <Text
+                        {/* Pill Icon Circle */}
+                        <View
                           style={[
-                            styles.medAdherenceBadgeText,
-                            med.hasScheduledDoses && med.adherencePercentage >= 80
-                              ? styles.scoreHighText
-                              : med.hasScheduledDoses && med.adherencePercentage >= 50
-                              ? styles.scoreMediumText
-                              : med.hasScheduledDoses
-                              ? styles.scoreLowText
-                              : styles.scoreNoneText,
+                            styles.medicineIconCircle,
+                            { backgroundColor: themeColor.bg },
                           ]}
                         >
-                          {med.hasScheduledDoses ? `${med.adherencePercentage}%` : "N/A"}
-                        </Text>
-                      </View>
-                    </View>
+                          <MaterialCommunityIcons
+                            name="pill"
+                            size={18}
+                            color={themeColor.color}
+                          />
+                        </View>
 
-                    <View style={styles.medicineStatsRow}>
-                      <Text style={styles.medStatText}>
-                        Scheduled: <Text style={styles.boldText}>{med.totalScheduled}</Text>
-                      </Text>
-                      <Text style={[styles.medStatText, { color: colors.taken }]}>
-                        Taken: <Text style={styles.boldText}>{med.takenCount}</Text>
-                      </Text>
-                      <Text style={[styles.medStatText, { color: colors.skipped }]}>
-                        Skipped: <Text style={styles.boldText}>{med.skippedCount}</Text>
-                      </Text>
-                      <Text style={[styles.medStatText, { color: colors.error }]}>
-                        Missed: <Text style={styles.boldText}>{med.missedCount}</Text>
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
-            </Card>
+                        {/* Medicine Info */}
+                        <View style={styles.medicineInfoCol}>
+                          <Text style={styles.medicineNameText} numberOfLines={1}>
+                            {med.medicineName}
+                          </Text>
+                          <Text style={styles.medicineDosageText} numberOfLines={1}>
+                            {med.dosage} {med.dosageUnit}
+                          </Text>
+                        </View>
 
-            {/* Day-by-Day Occurrence Log */}
-            <Card style={styles.sectionCard}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={styles.cardHeaderTitle}>Day-by-Day Adherence Log</Text>
-                <Text style={styles.sectionItemCount}>
-                  {report.dailySummaries.length} days
-                </Text>
-              </View>
-
-              {report.dailySummaries.length === 0 ? (
-                <Text style={styles.emptySectionText}>No daily data recorded.</Text>
-              ) : (
-                <>
-                  <View style={styles.dailyTableHeader}>
-                    <Text style={[styles.dailyTableHeadText, styles.dailyDateCol]}>Date</Text>
-                    <Text style={[styles.dailyTableHeadText, styles.dailyMetricsCol]}>
-                      Status & Counts
-                    </Text>
-                    <Text style={[styles.dailyTableHeadText, styles.dailyPercentCol]}>
-                      Adherence
-                    </Text>
-                  </View>
-
-                  {report.dailySummaries.map((day) => (
-                    <View key={day.date} style={styles.dailyRow}>
-                      <View style={styles.dailyDateCol}>
-                        <Text style={styles.dailyDayName}>{formatDayName(day.date)}</Text>
-                        <Text style={styles.dailyDateString}>
-                          {formatDateLabel(day.date).split(",")[0]}
-                        </Text>
-                      </View>
-
-                      <View style={styles.dailyMetricsCol}>
-                        {day.hasScheduledDoses ? (
-                          <View style={styles.dailyBadgesRow}>
-                            <Text style={[styles.dailyBadge, styles.badgeTaken]}>
-                              ✓ {day.takenCount}
-                            </Text>
-                            {day.skippedCount > 0 && (
-                              <Text style={[styles.dailyBadge, styles.badgeSkipped]}>
-                                ✕ {day.skippedCount}
-                              </Text>
-                            )}
-                            {day.missedCount > 0 && (
-                              <Text style={[styles.dailyBadge, styles.badgeMissed]}>
-                                ! {day.missedCount}
-                              </Text>
-                            )}
-                            {day.unresolvedSnoozedCount > 0 && (
-                              <Text style={[styles.dailyBadge, styles.badgeSnoozed]}>
-                                ⏰ {day.unresolvedSnoozedCount}
-                              </Text>
-                            )}
-                            {day.pendingCount > 0 && (
-                              <Text style={[styles.dailyBadge, styles.badgePending]}>
-                                ⏳ {day.pendingCount}
-                              </Text>
-                            )}
+                        {/* Progress Bar & Doses Count */}
+                        <View style={styles.medicineProgressCol}>
+                          <Text style={styles.medicineDosesRatioText}>
+                            {med.takenCount} taken / {med.totalScheduled} scheduled
+                          </Text>
+                          <View style={styles.medicineProgressBarTrack}>
+                            <View
+                              style={[
+                                styles.medicineProgressBarFill,
+                                { width: `${medPct}%` },
+                              ]}
+                            />
                           </View>
-                        ) : (
-                          <Text style={styles.noDailyDoses}>No doses scheduled</Text>
-                        )}
-                      </View>
+                        </View>
 
-                      <View style={styles.dailyPercentCol}>
-                        <Text
-                          style={[
-                            styles.dailyPercentText,
-                            day.hasScheduledDoses && day.adherencePercentage >= 80
-                              ? { color: colors.taken }
-                              : day.hasScheduledDoses && day.adherencePercentage >= 50
-                              ? { color: colors.snoozed }
-                              : day.hasScheduledDoses
-                              ? { color: colors.error }
-                              : { color: colors.textMuted },
-                          ]}
-                        >
-                          {day.hasScheduledDoses ? `${Math.round(day.adherencePercentage)}%` : "—"}
-                        </Text>
+                        {/* Percentage Badge */}
+                        <Text style={styles.medicinePercentageText}>{medPct}%</Text>
+
+                        {/* Chevron */}
+                        <Ionicons
+                          name="chevron-forward"
+                          size={16}
+                          color="#94A3B8"
+                          style={{ marginLeft: 6 }}
+                        />
                       </View>
+                    );
+                  })
+                )}
+              </View>
+            </View>
+
+            {/* 6. Adherence Over Time Section */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Adherence Over Time</Text>
+              <View style={styles.chartCard}>
+                <View style={styles.chartContainer}>
+                  {/* Y-axis */}
+                  <View style={styles.yAxisCol}>
+                    <Text style={styles.yAxisLabel}>100%</Text>
+                    <Text style={styles.yAxisLabel}>75%</Text>
+                    <Text style={styles.yAxisLabel}>50%</Text>
+                    <Text style={styles.yAxisLabel}>25%</Text>
+                    <Text style={styles.yAxisLabel}>0%</Text>
+                  </View>
+
+                  {/* Bars & Gridlines area */}
+                  <View style={styles.barsAreaWrapper}>
+                    {/* Horizontal gridlines */}
+                    <View style={styles.gridLinesContainer}>
+                      <View style={styles.gridLine} />
+                      <View style={styles.gridLine} />
+                      <View style={styles.gridLine} />
+                      <View style={styles.gridLine} />
+                      <View style={styles.gridLine} />
                     </View>
-                  ))}
-                </>
-              )}
-            </Card>
 
-            {/* Medical Disclaimer Box */}
+                    {/* Bars */}
+                    <View style={styles.barsRow}>
+                      {trendDays.map((td, idx) => {
+                        const barHeight = Math.max(6, Math.min(100, td.percentage));
+                        return (
+                          <View key={`${td.date}-${idx}`} style={styles.barCol}>
+                            {/* Top percentage */}
+                            <Text style={styles.barTopLabel}>{td.percentage}%</Text>
+
+                            {/* Bar Track & Fill */}
+                            <View style={styles.barTrack}>
+                              <View
+                                style={[
+                                  styles.barFill,
+                                  {
+                                    height: `${barHeight}%`,
+                                  },
+                                ]}
+                              />
+                            </View>
+
+                            {/* Day Name */}
+                            <Text style={styles.barDayLabel}>{td.dayName}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* 7. Action Buttons */}
+            <View style={styles.actionButtonsContainer}>
+              {/* Primary: Generate Report */}
+              <TouchableOpacity
+                style={styles.generateReportButton}
+                onPress={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Generate report"
+              >
+                <Ionicons
+                  name="document-text-outline"
+                  size={20}
+                  color="#FFFFFF"
+                  style={{ marginRight: 10 }}
+                />
+                <View style={styles.generateButtonTextCol}>
+                  <Text style={styles.generateButtonTitle}>
+                    {isDownloadingPdf ? "Generating Report..." : "Generate Report"}
+                  </Text>
+                  <Text style={styles.generateButtonSubtitle}>
+                    Create a report for the selected period.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Secondary: View Previous Reports */}
+              <TouchableOpacity
+                style={styles.previousReportsButton}
+                onPress={handleViewPreviousReports}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="View previous reports"
+              >
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color={colors.primary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.previousReportsButtonText}>View Previous Reports</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Medical Disclaimer */}
             <View style={styles.disclaimerBox}>
               <Text style={styles.disclaimerTitle}>⚠️ Medical Disclaimer</Text>
               <Text style={styles.disclaimerText}>
@@ -899,670 +928,643 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
       </ScrollView>
+
+      {/* 8. Bottom Navigation */}
+      {!hideBottomNav && (
+        <View style={styles.bottomTabBar}>
+          {/* Home Tab */}
+          <TouchableOpacity
+            style={styles.tabItem}
+            onPress={onBack}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: false }}
+            accessibilityLabel="Home tab"
+          >
+            <Ionicons name="home-outline" size={22} color="#94A3B8" />
+            <Text style={styles.tabItemLabel}>Home</Text>
+          </TouchableOpacity>
+
+          {/* Medicines Tab */}
+          <TouchableOpacity
+            style={styles.tabItem}
+            onPress={onNavigateToMedicines}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: false }}
+            accessibilityLabel="Medicines tab"
+          >
+            <Ionicons name="medkit-outline" size={22} color="#94A3B8" />
+            <Text style={styles.tabItemLabel}>Medicines</Text>
+          </TouchableOpacity>
+
+          {/* Calendar Tab */}
+          <TouchableOpacity
+            style={styles.tabItem}
+            onPress={onNavigateToCalendar}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: false }}
+            accessibilityLabel="Calendar tab"
+          >
+            <Ionicons name="calendar-outline" size={22} color="#94A3B8" />
+            <Text style={styles.tabItemLabel}>Calendar</Text>
+          </TouchableOpacity>
+
+          {/* Profile Tab */}
+          <TouchableOpacity
+            style={styles.tabItem}
+            onPress={onNavigateToProfile}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: false }}
+            accessibilityLabel="Profile tab"
+          >
+            <Ionicons name="person-outline" size={22} color="#94A3B8" />
+            <Text style={styles.tabItemLabel}>Profile</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
 
+export default ReportsScreen;
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#F8FAFC",
   },
+
+  /* 1. Header */
   header: {
-    backgroundColor: colors.primaryDark,
-    paddingHorizontal: spacing.lg,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ? StatusBar.currentHeight + spacing.sm : spacing.xl) : spacing.md,
-    paddingBottom: spacing.md,
-  },
-  headerRow: {
+    backgroundColor: "#FFFFFF",
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 8 : 12,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
   backButton: {
-    paddingVertical: spacing.xs,
-    paddingRight: spacing.md,
-    minHeight: 48,
-    minWidth: 48,
-    justifyContent: "center",
+    marginRight: 12,
   },
-  backButtonText: {
-    ...typography.body,
-    fontWeight: "700",
-    color: colors.primaryLight,
-  },
-  titleContainer: {
+  headerTitleCol: {
     flex: 1,
   },
   headerTitle: {
-    ...typography.h2,
-    color: colors.textInverse,
+    fontSize: 22,
     fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    ...typography.caption,
-    color: colors.primaryLight,
+    fontSize: 13,
+    color: colors.textSecondary,
     marginTop: 2,
   },
-  segmentedContainer: {
-    flexDirection: "row",
-    backgroundColor: "rgba(0, 0, 0, 0.22)",
-    borderRadius: borderRadius.md,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-    marginTop: spacing.xs,
-  },
-  segmentButton: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 48,
-  },
-  segmentButtonActive: {
-    backgroundColor: colors.surface,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-  },
-  segmentText: {
-    ...typography.body,
-    fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.85)",
-  },
-  segmentTextActive: {
-    color: colors.primaryDark,
-    fontWeight: "700",
-  },
+
+  /* Caregiver Selector */
   caregiverSelectorContainer: {
-    marginTop: spacing.md,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
   caregiverSelectorLabel: {
-    ...typography.small,
-    color: colors.primaryLight,
-    marginBottom: spacing.xs,
+    fontSize: 12,
     fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  noPatientsText: {
-    ...typography.caption,
-    color: colors.surface,
-    fontStyle: "italic",
+    color: colors.textSecondary,
+    marginBottom: 6,
   },
   patientPillRow: {
     flexDirection: "row",
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
+    gap: 8,
   },
   patientPill: {
-    backgroundColor: "rgba(255, 255, 255, 0.18)",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.full,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    minHeight: 48,
-    justifyContent: "center",
-    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
   patientPillSelected: {
-    backgroundColor: colors.surface,
-    borderColor: colors.primaryHover,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   patientPillText: {
-    ...typography.caption,
+    fontSize: 12,
     fontWeight: "600",
-    color: colors.textInverse,
+    color: colors.textSecondary,
   },
   patientPillTextSelected: {
-    color: colors.primaryDark,
+    color: "#FFFFFF",
     fontWeight: "700",
   },
+  noPatientsText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+
+  /* 2. Period Control Header */
+  periodControlContainer: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  periodRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  periodSectionLabel: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  periodPillGroup: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 20,
+    padding: 3,
+    gap: 4,
+  },
+  periodPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  periodPillSelected: {
+    backgroundColor: colors.primary,
+  },
+  periodPillUnselected: {
+    backgroundColor: "transparent",
+  },
+  periodPillText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  periodPillTextSelected: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  periodPillTextUnselected: {
+    color: colors.textSecondary,
+  },
+
+  /* 3. Date Range Box */
+  dateRangeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+  },
+  dateRangeText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+
   scrollContent: {
-    padding: spacing.md,
-    paddingBottom: spacing.huge,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 30,
   },
-  stateContainer: {
-    marginVertical: spacing.huge,
-  },
-  errorWrapper: {
-    marginVertical: spacing.md,
-  },
-  revokedCard: {
-    backgroundColor: colors.dangerLight,
-    borderColor: colors.danger,
-    borderWidth: 1.5,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-  },
-  revokedTitle: {
-    ...typography.h3,
-    color: colors.danger,
-    marginBottom: spacing.xs,
-  },
-  revokedMessage: {
-    ...typography.body,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  revokedHint: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontStyle: "italic",
-  },
-  metaCard: {
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-  },
-  metaHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+
+  loaderBox: {
+    paddingVertical: 60,
     alignItems: "center",
-    marginBottom: spacing.sm,
   },
-  periodBadge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: borderRadius.sm,
-  },
-  periodBadgeText: {
-    ...typography.small,
-    fontWeight: "800",
-    color: colors.primaryDark,
-    letterSpacing: 0.5,
-  },
-  metaGenerated: {
-    ...typography.small,
-    color: colors.textMuted,
-  },
-  metaDateRange: {
-    ...typography.h3,
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  metaPatientRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 2,
-  },
-  metaPatientLabel: {
-    ...typography.caption,
-    fontWeight: "600",
-    color: colors.textMuted,
-    marginRight: spacing.xs,
-  },
-  metaPatientName: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.textSecondary,
-  },
-  adherenceCard: {
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-  },
-  cardHeaderTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    fontWeight: "700",
-    marginBottom: spacing.md,
-  },
-  adherenceScoreRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-    paddingVertical: spacing.xs,
-  },
-  adherenceScoreCircle: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    borderWidth: 4,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: spacing.md,
-  },
-  scoreHigh: {
-    backgroundColor: colors.takenLight,
-    borderColor: colors.taken,
-  },
-  scoreMedium: {
-    backgroundColor: colors.snoozedLight,
-    borderColor: colors.snoozed,
-  },
-  scoreLow: {
-    backgroundColor: colors.dangerLight,
-    borderColor: colors.error,
-  },
-  scoreNone: {
-    backgroundColor: colors.surfaceSubtle,
-    borderColor: colors.border,
-  },
-  scoreHighText: {
-    color: colors.taken,
-  },
-  scoreMediumText: {
-    color: colors.snoozed,
-  },
-  scoreLowText: {
-    color: colors.error,
-  },
-  scoreNoneText: {
-    color: colors.textMuted,
-  },
-  adherenceScoreText: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  adherenceScoreLabel: {
-    ...typography.small,
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: -2,
-  },
-  adherenceMetricsOverview: {
-    flex: 1,
-  },
-  overviewHeadline: {
-    ...typography.h3,
-    fontSize: 17,
-    fontWeight: "700",
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  overviewSubtext: {
-    ...typography.body,
+  loadingText: {
     fontSize: 14,
     color: colors.textSecondary,
-    lineHeight: 20,
-  },
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  statBox: {
-    width: "30.5%",
-    flexGrow: 1,
-    minWidth: 95,
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  statBoxTotal: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.textSecondary,
-  },
-  statBoxTaken: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.taken,
-  },
-  statBoxSkipped: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.skipped,
-  },
-  statBoxMissed: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.error,
-  },
-  statBoxSnoozed: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.snoozed,
-  },
-  statBoxPending: {
-    borderTopWidth: 3.5,
-    borderTopColor: colors.due,
-  },
-  statBoxIcon: {
-    fontSize: 16,
-    marginBottom: 2,
-  },
-  statBoxNumber: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  statBoxLabel: {
-    ...typography.small,
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.textMuted,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: 2,
-    textAlign: "center",
-  },
-  actionsCard: {
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-  },
-  actionsSubtitle: {
-    ...typography.body,
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: spacing.md,
-    lineHeight: 20,
-  },
-  pdfSuccessBox: {
-    backgroundColor: colors.takenLight,
-    borderColor: colors.taken,
-    borderWidth: 1,
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
-  },
-  pdfSuccessText: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.taken,
-  },
-  singleActionButtonContainer: {
-    gap: spacing.sm,
-  },
-  fullWidthButton: {
-    width: "100%",
-    minHeight: 48,
-  },
-  reDownloadButton: {
-    paddingVertical: spacing.sm,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-  },
-  reDownloadButtonText: {
-    ...typography.caption,
-    fontWeight: "600",
-    color: colors.primary,
-  },
-  actionButtonsRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  actionButton: {
-    flex: 1,
-    minHeight: 48,
-  },
-  streakCard: {
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
-  },
-  streakHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  streakEvalDate: {
-    ...typography.small,
-    color: colors.textMuted,
+    marginTop: 12,
     fontWeight: "500",
   },
-  streakMetricsRow: {
+  errorWrapper: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.xs,
-  },
-  streakBox: {
-    flex: 1,
     alignItems: "center",
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: 2,
+    backgroundColor: "#FEE2E2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: "#FCA5A5",
   },
-  streakEmoji: {
-    fontSize: 20,
-    marginBottom: 2,
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: "500",
   },
-  streakNumber: {
-    fontSize: 20,
+
+  /* Sections */
+  sectionContainer: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: "800",
     color: colors.textPrimary,
-  },
-  streakLabel: {
-    ...typography.small,
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.textMuted,
-    textAlign: "center",
-    marginTop: 2,
-  },
-  lastAdherentNote: {
-    ...typography.small,
-    color: colors.textSecondary,
-    fontStyle: "italic",
-    marginTop: spacing.md,
-    textAlign: "center",
-  },
-  sectionCard: {
-    marginBottom: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    padding: spacing.md,
+    marginBottom: 10,
   },
   sectionHeaderRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  sectionItemCount: {
-    ...typography.small,
-    color: colors.textMuted,
-    fontWeight: "600",
-  },
-  emptySectionText: {
-    ...typography.body,
-    color: colors.textMuted,
-    fontStyle: "italic",
-    marginVertical: spacing.sm,
-  },
-  medicineItem: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  medicineItemHeader: {
-    flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: spacing.sm,
+    marginBottom: 10,
+  },
+  sortDropdownButton: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sortDropdownText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+
+  /* 4. Report Summary Card */
+  summaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  summaryTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  ringCol: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRingWrapper: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRingCircle: {
+    borderWidth: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressRingInner: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  progressPercentageText: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
+  },
+  progressLabelText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginTop: 1,
+  },
+  summaryMessageCol: {
+    flex: 1,
+    marginLeft: 18,
+  },
+  progressTitleText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  progressSubtitleText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+
+  /* Metric Tiles Row */
+  metricTilesRow: {
+    flexDirection: "row",
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    paddingTop: 14,
+  },
+  metricTile: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  tileScheduled: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+  },
+  tileTaken: {
+    backgroundColor: "#F0FDF4",
+    borderColor: "#DCFCE7",
+  },
+  tileSkipped: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FEE2E2",
+  },
+  tilePending: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FEF3C7",
+  },
+  metricIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metricNumberText: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  metricLabelText: {
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  metricSublabelText: {
+    fontSize: 9,
+    color: colors.textSecondary,
+    textAlign: "center",
+    marginTop: 2,
+  },
+
+  /* 5. Medication Breakdown */
+  medicationsListCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  medicineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  medicineRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  medicineIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
   },
   medicineInfoCol: {
     flex: 1,
-    marginRight: spacing.sm,
+    marginRight: 8,
   },
-  medicineName: {
-    ...typography.h3,
-    fontSize: 16,
-    color: colors.textPrimary,
+  medicineNameText: {
+    fontSize: 14,
     fontWeight: "700",
-    flexWrap: "wrap",
+    color: colors.textPrimary,
   },
-  medicineDosage: {
-    ...typography.caption,
-    color: colors.textMuted,
+  medicineDosageText: {
+    fontSize: 12,
+    color: colors.textSecondary,
     marginTop: 2,
   },
-  medAdherenceBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    minWidth: 52,
-    alignItems: "center",
+  medicineProgressCol: {
+    width: 110,
+    marginRight: 8,
   },
-  medAdherenceBadgeText: {
-    ...typography.caption,
-    fontWeight: "800",
-  },
-  medicineStatsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: colors.surface,
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  medStatText: {
-    ...typography.small,
+  medicineDosesRatioText: {
+    fontSize: 11,
     color: colors.textSecondary,
-    fontWeight: "500",
+    marginBottom: 4,
   },
-  boldText: {
+  medicineProgressBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#E2E8F0",
+    overflow: "hidden",
+  },
+  medicineProgressBarFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 3,
+  },
+  medicinePercentageText: {
+    fontSize: 13,
     fontWeight: "700",
+    color: colors.primary,
+    minWidth: 32,
+    textAlign: "right",
   },
-  dailyTableHeader: {
+  emptyMedicationsText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    paddingVertical: 20,
+    textAlign: "center",
+  },
+
+  /* 6. Adherence Over Time */
+  chartCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  chartContainer: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingBottom: spacing.xs + 2,
-    borderBottomWidth: 1.5,
-    borderBottomColor: colors.border,
-    marginBottom: spacing.xs,
-  },
-  dailyTableHeadText: {
-    ...typography.small,
-    fontWeight: "700",
-    color: colors.textMuted,
-    textTransform: "uppercase",
-    fontSize: 11,
-    letterSpacing: 0.5,
-  },
-  dailyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-  },
-  dailyDateCol: {
-    width: 75,
-  },
-  dailyDayName: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  dailyDateString: {
-    ...typography.small,
-    color: colors.textMuted,
-  },
-  dailyMetricsCol: {
-    flex: 1,
-    paddingHorizontal: spacing.xs,
-  },
-  dailyBadgesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-  },
-  dailyBadge: {
-    ...typography.small,
-    fontSize: 11,
-    fontWeight: "700",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  badgeTaken: {
-    backgroundColor: colors.takenLight,
-    color: colors.taken,
-  },
-  badgeSkipped: {
-    backgroundColor: colors.skippedLight,
-    color: colors.skipped,
-  },
-  badgeMissed: {
-    backgroundColor: colors.dangerLight,
-    color: colors.error,
-  },
-  badgeSnoozed: {
-    backgroundColor: colors.snoozedLight,
-    color: colors.snoozed,
-  },
-  badgePending: {
-    backgroundColor: colors.dueLight,
-    color: colors.due,
-  },
-  noDailyDoses: {
-    ...typography.small,
-    color: colors.textMuted,
-    fontStyle: "italic",
-  },
-  dailyPercentCol: {
-    width: 80,
+    height: 160,
     alignItems: "flex-end",
   },
-  dailyPercentText: {
-    ...typography.body,
-    fontWeight: "800",
-    fontSize: 15,
+  yAxisCol: {
+    width: 34,
+    height: 120,
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    paddingRight: 6,
+    paddingBottom: 20,
   },
-  disclaimerBox: {
-    backgroundColor: "#FFFBEB",
-    borderColor: "#FDE68A",
+  yAxisLabel: {
+    fontSize: 10,
+    color: "#94A3B8",
+    fontWeight: "600",
+  },
+  barsAreaWrapper: {
+    flex: 1,
+    height: 160,
+    position: "relative",
+  },
+  gridLinesContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 120,
+    justifyContent: "space-between",
+  },
+  gridLine: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    width: "100%",
+  },
+  barsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    height: 160,
+    alignItems: "flex-end",
+    paddingHorizontal: 4,
+  },
+  barCol: {
+    flex: 1,
+    alignItems: "center",
+    height: 160,
+    justifyContent: "flex-end",
+  },
+  barTopLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  barTrack: {
+    width: 18,
+    height: 100,
+    backgroundColor: "#E2E8F0",
+    borderRadius: 6,
+    overflow: "hidden",
+    justifyContent: "flex-end",
+  },
+  barFill: {
+    width: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+  },
+  barDayLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginTop: 6,
+  },
+
+  /* 7. Action Buttons */
+  actionButtonsContainer: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  generateReportButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  generateButtonTextCol: {
+    flex: 1,
+  },
+  generateButtonTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  generateButtonSubtitle: {
+    fontSize: 11,
+    color: "#CCFBF1",
+    marginTop: 1,
+  },
+  previousReportsButton: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.huge,
+    borderColor: colors.primary,
+  },
+  previousReportsButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+
+  /* Disclaimer Box */
+  disclaimerBox: {
+    backgroundColor: "#FEF2F2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#FECACA",
   },
   disclaimerTitle: {
-    ...typography.caption,
+    fontSize: 12,
     fontWeight: "700",
-    color: "#92400E",
-    marginBottom: spacing.xs,
+    color: colors.danger,
+    marginBottom: 2,
   },
   disclaimerText: {
-    ...typography.small,
-    color: "#78350F",
-    lineHeight: 18,
+    fontSize: 11,
+    color: colors.textSecondary,
+    lineHeight: 15,
+  },
+
+  /* 8. Bottom Navigation */
+  bottomTabBar: {
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    paddingBottom: Platform.OS === "android" ? 8 : 12,
+    paddingTop: 8,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabItemLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#94A3B8",
+    marginTop: 3,
   },
 });

@@ -5,7 +5,13 @@
 export type UserRole = "patient" | "caregiver";
 
 export interface NotificationPreferences {
-  medicationRemindersEnabled: boolean;
+  medicationRemindersEnabled?: boolean;
+  missedDoseAlertsEnabled?: boolean;
+  emailNotificationsEnabled?: boolean;
+  emailReportsEnabled?: boolean;
+  emailAlertsEnabled?: boolean;
+  soundEnabled?: boolean;
+  vibrationEnabled?: boolean;
 }
 
 export interface User {
@@ -158,10 +164,10 @@ export interface Caregiver {
 }
 
 export interface CaregiverCreatePayload {
-  caregiverName: string;
   caregiverEmail: string;
-  caregiverPhone: string;
-  relationship: string;
+  caregiverName?: string;
+  caregiverPhone?: string;
+  relationship?: string;
 }
 
 export interface NotificationItem {

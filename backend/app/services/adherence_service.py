@@ -12,8 +12,8 @@ Services never depend on Routers.
 
 import calendar
 import logging
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from bson import ObjectId
 import pymongo
@@ -23,6 +23,7 @@ from app.db.mongodb import (
     get_medicines_collection,
     get_schedules_collection,
 )
+from app.models.collections import now_utc
 from app.schemas.calendar import (
     CalendarOccurrence,
     CalendarResponse,
@@ -30,6 +31,11 @@ from app.schemas.calendar import (
     DayAggregateStatus,
     DaySummary,
     StreakResponse,
+)
+from app.services.missed_dose_service import (
+    OccurrenceClassification,
+    classify_occurrence,
+    resolve_effective_activity,
 )
 from app.services.occurrence_engine import is_schedule_occurrence
 
@@ -427,3 +433,148 @@ async def build_streak_response(
         lastAdherentDate=last_adherent_str,
         evaluatedDate=today_str,
     )
+
+
+async def calculate_adherence_summary(
+    patient_oid: ObjectId,
+    start_date: Union[date, str],
+    end_date: Union[date, str],
+    reference_time: Optional[datetime] = None,
+    medicines_coll: Optional[Any] = None,
+    schedules_coll: Optional[Any] = None,
+    activities_coll: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Calculate clinical and mathematical adherence summary for a patient across a date range.
+
+    The adherence percentage rule is:
+        Adherence = (Taken Due Doses / Total Due Scheduled Doses) * 100
+
+    Future pending doses (scheduled occurrences whose time is in the future and not yet acted upon)
+    are excluded from the due denominator so they do not artificially depress current adherence.
+
+    Duplicate activity records for the same occurrence are resolved to a single effective state
+    adhering to Phase 7 transition semantics (Taken > Skipped > Snoozed).
+    """
+    if isinstance(start_date, str):
+        start_d = date.fromisoformat(start_date)
+    else:
+        start_d = start_date
+
+    if isinstance(end_date, str):
+        end_d = date.fromisoformat(end_date)
+    else:
+        end_d = end_date
+
+    start_str = start_d.isoformat()
+    end_str = end_d.isoformat()
+
+    if reference_time is None:
+        ref_time = now_utc()
+    else:
+        ref_time = reference_time
+        if ref_time.tzinfo is None:
+            ref_time = ref_time.replace(tzinfo=timezone.utc)
+
+    med_coll = medicines_coll if medicines_coll is not None else get_medicines_collection()
+    sched_coll = schedules_coll if schedules_coll is not None else get_schedules_collection()
+    act_coll = activities_coll if activities_coll is not None else get_activities_collection()
+
+    # 1. Fetch patient's medicines
+    medicines = await med_coll.find({"userId": patient_oid}).to_list(length=1000)
+    med_map = {str(m["_id"]): m for m in medicines}
+
+    # 2. Fetch enabled schedules for this patient
+    schedules = await sched_coll.find({"userId": patient_oid, "enabled": True}).to_list(length=1000)
+
+    # 3. Fetch recorded activities in the date range
+    activities = await act_coll.find({
+        "userId": patient_oid,
+        "scheduledDate": {"$gte": start_str, "$lte": end_str},
+    }).to_list(length=3000)
+
+    # Map activities by (scheduleId_str, scheduledDate, scheduledTime)
+    act_map: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+    for act in activities:
+        key = (str(act.get("scheduleId")), str(act.get("scheduledDate")), str(act.get("scheduledTime")))
+        if key not in act_map:
+            act_map[key] = []
+        act_map[key].append(act)
+
+    # 4. Generate & classify occurrences day by day
+    occurrences: List[Any] = []
+    matched_keys = set()
+    curr_d = start_d
+    day_step = timedelta(days=1)
+
+    while curr_d <= end_d:
+        curr_str = curr_d.isoformat()
+        for sched in schedules:
+            sched_med_id = str(sched.get("medicineId"))
+            med = med_map.get(sched_med_id)
+            if not med:
+                continue
+
+            if not is_schedule_occurrence(sched, med, curr_d, curr_str):
+                continue
+
+            sched_id_str = str(sched["_id"])
+            sched_time = str(sched.get("time", "08:00")).strip()
+            key = (sched_id_str, curr_str, sched_time)
+            acts = act_map.get(key, [])
+            matched_keys.add(key)
+
+            occ = classify_occurrence(
+                sched=sched,
+                med=med,
+                curr_date=curr_d,
+                curr_str=curr_str,
+                activities=acts,
+                reference_time=ref_time,
+            )
+            if occ:
+                occurrences.append(occ)
+
+        curr_d += day_step
+
+    # 5. Handle any ad-hoc / unmatched activities recorded in this date range
+    extra_taken = 0
+    extra_skipped = 0
+    for key, acts in act_map.items():
+        if key not in matched_keys:
+            eff = resolve_effective_activity(acts)
+            if eff:
+                action = eff.get("action")
+                if action == "Taken":
+                    extra_taken += 1
+                elif action == "Skipped":
+                    extra_skipped += 1
+
+    # 6. Count categorized dose occurrences
+    taken_count = sum(1 for o in occurrences if o.status == OccurrenceClassification.TAKEN) + extra_taken
+    skipped_count = sum(1 for o in occurrences if o.status == OccurrenceClassification.SKIPPED) + extra_skipped
+    missed_count = sum(1 for o in occurrences if o.status == OccurrenceClassification.MISSED)
+    snoozed_count = sum(1 for o in occurrences if o.status == OccurrenceClassification.SNOOZED_ACTIVE)
+    pending_count = sum(1 for o in occurrences if o.status == OccurrenceClassification.PENDING)
+
+    total_scheduled = len(occurrences) + extra_taken + extra_skipped
+    due_count = taken_count + skipped_count + missed_count + snoozed_count
+
+    if due_count > 0:
+        adherence_pct = round((taken_count / due_count) * 100.0, 1)
+    else:
+        adherence_pct = 0.0
+
+    return {
+        "startDate": start_str,
+        "endDate": end_str,
+        "totalScheduled": total_scheduled,
+        "takenCount": taken_count,
+        "skippedCount": skipped_count,
+        "missedCount": missed_count,
+        "snoozedCount": snoozed_count,
+        "pendingCount": pending_count,
+        "dueCount": due_count,
+        "adherencePercentage": adherence_pct,
+        "hasScheduledDoses": total_scheduled > 0,
+        "formula": "Adherence = (Taken Due Doses / Total Due Scheduled Doses) * 100",
+    }

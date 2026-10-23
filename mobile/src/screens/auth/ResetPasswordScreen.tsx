@@ -1,6 +1,16 @@
 /**
- * Accessible Password Reset Screen with 6-Digit Verification Code
- * MediTrack+ Smart Medication Management & Adherence
+ * Reset Password & Recovery OTP Screens (PDF Page 1 & Page 2 Redesign)
+ *
+ * Handles the two-stage password recovery workflow:
+ * - Stage 1 (PDF Page 2): Recovery OTP Verification ("Verify your code", masked email,
+ *   6 OTP boxes, resend countdown, "Use a different email", security card)
+ * - Stage 2 (PDF Page 1): Create New Password ("Create New Password", password inputs,
+ *   eye controls, password rules card, "Reset Password" button, "Back to Verification")
+ *
+ * Features:
+ * - Exact visual hierarchy of PDF Page 1 & Page 2 references
+ * - MediTrack+ branding & botanical leaves decoration
+ * - Preserves existing verifyResetOtp, resend, and resetPassword API contracts
  */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -8,23 +18,27 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import apiClient from "../../api/client";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { verifyResetOtp } from "../../api/auth";
+import apiClient from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoints";
-import { Button } from "../../components/common/Button";
-import { Card } from "../../components/common/Card";
-import { Input } from "../../components/common/Input";
-import { MediTrackLogo } from "../../components/common/MediTrackLogo";
+import {
+  AuthBotanicalLeaves,
+  AuthBrandHeader,
+  OtpCodeInput,
+  PasswordRequirementsCard,
+} from "../../components/auth";
+import { SuccessState } from "../../components/common";
 import { config } from "../../constants/config";
-import { accessibility, borderRadius, colors, spacing, typography } from "../../constants/theme";
 
 interface ResetPasswordScreenProps {
   initialEmail?: string;
@@ -37,22 +51,38 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
   onNavigateToLogin,
   onNavigateToForgotPassword,
 }) => {
+  // Safe area insets
+  let insetsTop = 0;
+  let insetsBottom = 0;
+  try {
+    const insets = useSafeAreaInsets();
+    insetsTop = insets?.top || 0;
+    insetsBottom = insets?.bottom || 0;
+  } catch {
+    insetsTop = 0;
+    insetsBottom = 0;
+  }
+  const statusBarHeight =
+    Platform.OS === "android" ? StatusBar.currentHeight || 24 : 0;
+  const topInset = Math.max(insetsTop, statusBarHeight);
+
+  // Recovery & Form states
   const [email, setEmail] = useState<string>(initialEmail);
   const [code, setCode] = useState<string>("");
   const [isCodeVerified, setIsCodeVerified] = useState<boolean>(false);
   const [verifyingCode, setVerifyingCode] = useState<boolean>(false);
-  const [codeSuccessMsg, setCodeSuccessMsg] = useState<string | null>(null);
 
   const [newPassword, setNewPassword] = useState<string>("");
   const [confirmNewPassword, setConfirmNewPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+
   const [loading, setLoading] = useState<boolean>(false);
   const [resending, setResending] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
-  const [cooldown, setCooldown] = useState<number>(60);
+  const [cooldown, setCooldown] = useState<number>(45);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -68,9 +98,28 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     };
   }, [cooldown]);
 
-  const handleVerifyCode = async () => {
+  // Mask email helper e.g. "saranya@gmail.com" -> "sa****@gmail.com"
+  const maskEmail = (rawEmail: string): string => {
+    if (!rawEmail || !rawEmail.includes("@")) return rawEmail || "your email";
+    const [local, domain] = rawEmail.split("@");
+    if (local.length <= 2) {
+      return `${local}***@${domain}`;
+    }
+    const visible = local.slice(0, 2);
+    const asterisks = "*".repeat(Math.max(2, Math.min(4, local.length - 2)));
+    return `${visible}${asterisks}@${domain}`;
+  };
+
+  const formatCooldown = (sec: number) => {
+    const minutes = Math.floor(sec / 60);
+    const seconds = sec % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  // Step 1: Verify OTP Code
+  const handleVerifyCode = async (explicitCode?: string) => {
     const trimmedEmail = email.trim().toLowerCase();
-    const trimmedCode = code.trim();
+    const trimmedCode = (explicitCode || code).trim();
 
     if (!trimmedEmail) {
       setError("Please enter your email address.");
@@ -82,14 +131,15 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     }
 
     setError(null);
-    setCodeSuccessMsg(null);
     setVerifyingCode(true);
 
     try {
       const res = await verifyResetOtp(trimmedEmail, trimmedCode);
       if (res.valid) {
         setIsCodeVerified(true);
-        setCodeSuccessMsg("✓ Verification code verified. You can now set your new password.");
+        setError(null);
+      } else {
+        setError("Invalid or expired reset code. Please check and try again.");
       }
     } catch (err: any) {
       setIsCodeVerified(false);
@@ -106,6 +156,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     }
   };
 
+  // Resend OTP Code
   const handleResendCode = async () => {
     const trimmedEmail = email.trim().toLowerCase();
     if (!trimmedEmail) {
@@ -121,8 +172,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       await apiClient.post(ENDPOINTS.AUTH.FORGOT_PASSWORD, {
         email: trimmedEmail,
       });
-      setCodeSuccessMsg("A new verification code has been dispatched to your email.");
-      setCooldown(60);
+      setCooldown(45);
       setCode("");
       setIsCodeVerified(false);
     } catch (err: any) {
@@ -132,6 +182,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     }
   };
 
+  // Step 2: Set New Password
   const handleResetPassword = async () => {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedCode = code.trim();
@@ -140,7 +191,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       setError("Please enter your email address.");
       return;
     }
-    if (!trimmedCode || trimmedCode.length !== 6 || !/^\d{6}$/.test(trimmedCode)) {
+    if (!trimmedCode || trimmedCode.length !== 6) {
       setError("Please enter the 6-digit numeric verification code.");
       return;
     }
@@ -149,7 +200,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      setError("New passwords do not match. Please verify.");
+      setError("Passwords do not match.");
       return;
     }
 
@@ -157,7 +208,7 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
     setLoading(true);
 
     try {
-      // Validate OTP first if not already validated
+      // Re-validate OTP if needed
       if (!isCodeVerified) {
         await verifyResetOtp(trimmedEmail, trimmedCode);
         setIsCodeVerified(true);
@@ -193,432 +244,698 @@ export const ResetPasswordScreen: React.FC<ResetPasswordScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.container}>
+      {/* Decorative Mint Botanical Leaves */}
+      <AuthBotanicalLeaves />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardContainer}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: topInset + 12,
+              paddingBottom: insetsBottom + 32,
+            },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Brand Header */}
-          <View style={styles.header}>
-            <MediTrackLogo size={56} style={styles.brandLogo} />
-            <Text style={styles.title}>MediTrack+</Text>
-            <Text style={styles.subtitle}>Smart Medication Management & Adherence</Text>
-          </View>
-
-          {/* Form Card */}
-          <Card style={styles.card}>
-            <Text style={styles.formTitle}>Set New Password</Text>
-            <Text style={styles.formSubtitle}>
-              Enter the 6-digit code sent to your email and choose a new password (min. 8 characters).
-            </Text>
-
-            {error ? (
-              <View style={styles.errorBanner} accessibilityRole="alert">
-                <Text style={styles.errorIcon}>⚠️</Text>
-                <Text style={styles.errorBannerText}>{error}</Text>
-              </View>
-            ) : null}
-
-            {success ? (
-              <View style={styles.successBanner} accessibilityRole="alert">
-                <Text style={styles.successIcon}>✅</Text>
-                <Text style={styles.successBannerText}>
-                  Password reset successfully! Returning to login...
-                </Text>
-              </View>
-            ) : null}
-
-            {/* Email Field */}
-            <Input
-              label="Account Email"
-              placeholder="e.g. yourname@example.com"
-              value={email}
-              onChangeText={(text) => {
-                setEmail(text);
-                if (error) setError(null);
-              }}
-              onFocus={() => setFocusedField("email")}
-              onBlur={() => setFocusedField(null)}
-              style={[styles.inputField, focusedField === "email" && styles.inputFocused]}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading && !success}
+          {success ? (
+            <SuccessState
+              variant="password_changed"
+              actionTitle="Continue to Sign In"
+              onActionPress={onNavigateToLogin}
             />
+          ) : isCodeVerified ? (
+            /* =======================================================
+               Stage 2: Reset Password (PDF Page 1 Reference)
+               ======================================================= */
+            <View>
+              {/* Header Branding with Back to Verification Arrow */}
+              <AuthBrandHeader
+                title="Create New Password"
+                subtitle="Create a new password for your MediTrack+ account."
+                onBack={() => {
+                  setError(null);
+                  setIsCodeVerified(false);
+                }}
+                backAccessibilityLabel="Back to Code Verification"
+              />
 
-            {/* 6-Digit Code Field */}
-            <Input
-              label="6-Digit Verification Code"
-              placeholder="123456"
-              value={code}
-              onChangeText={(text) => {
-                const numericOnly = text.replace(/[^0-9]/g, "").slice(0, 6);
-                setCode(numericOnly);
-                if (error) setError(null);
-              }}
-              onFocus={() => setFocusedField("code")}
-              onBlur={() => setFocusedField(null)}
-              style={[
-                styles.inputField,
-                styles.codeInput,
-                focusedField === "code" && styles.inputFocused,
-              ]}
-              keyboardType="number-pad"
-              maxLength={6}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading && !success}
-            />
-
-            {/* Code Verification Feedback */}
-            {codeSuccessMsg ? (
-              <View style={styles.codeSuccessBox}>
-                <Text style={styles.codeSuccessText}>{codeSuccessMsg}</Text>
-              </View>
-            ) : null}
-
-            {/* Code Actions: Verify and Resend Cooldown */}
-            <View style={styles.codeActionRow}>
-              <TouchableOpacity
-                onPress={handleVerifyCode}
-                disabled={code.length !== 6 || verifyingCode || loading || isCodeVerified}
-                style={[
-                  styles.verifyCodeBtn,
-                  (code.length !== 6 || isCodeVerified) && styles.verifyCodeBtnDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Verify 6-digit code"
-              >
-                {verifyingCode ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.verifyCodeBtnText}>
-                    {isCodeVerified ? "✓ Code Verified" : "Verify Code"}
+              {/* Success Banner */}
+              {success ? (
+                <View style={styles.successBanner} accessibilityRole="alert">
+                  <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+                  <Text style={styles.successBannerText}>
+                    Password reset successfully! Returning to login...
                   </Text>
+                </View>
+              ) : null}
+
+              {/* New Password Field */}
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>New Password</Text>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    focusedField === "newPassword" && styles.inputWrapperFocused,
+                  ]}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color={focusedField === "newPassword" ? "#0D9488" : "#64748B"}
+                    style={styles.inputLeftIcon}
+                  />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Enter new password"
+                    placeholderTextColor="#94A3B8"
+                    value={newPassword}
+                    onChangeText={(text) => {
+                      setNewPassword(text);
+                      if (error) setError(null);
+                    }}
+                    onFocus={() => setFocusedField("newPassword")}
+                    onBlur={() => setFocusedField(null)}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    editable={!loading && !success}
+                    accessibilityLabel="New password input"
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setShowPassword(!showPassword)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                    disabled={loading || success}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color="#64748B"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Confirm New Password Field */}
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>Confirm New Password</Text>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    focusedField === "confirmNewPassword" && styles.inputWrapperFocused,
+                    Boolean(error && error.includes("match")) && styles.inputWrapperError,
+                  ]}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color={
+                      focusedField === "confirmNewPassword"
+                        ? "#0D9488"
+                        : error && error.includes("match")
+                        ? "#DC2626"
+                        : "#64748B"
+                    }
+                    style={styles.inputLeftIcon}
+                  />
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Re-enter new password"
+                    placeholderTextColor="#94A3B8"
+                    value={confirmNewPassword}
+                    onChangeText={(text) => {
+                      setConfirmNewPassword(text);
+                      if (error) setError(null);
+                    }}
+                    onFocus={() => setFocusedField("confirmNewPassword")}
+                    onBlur={() => setFocusedField(null)}
+                    secureTextEntry={!showConfirmPassword}
+                    autoCapitalize="none"
+                    editable={!loading && !success}
+                    accessibilityLabel="Confirm new password input"
+                  />
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      showConfirmPassword ? "Hide password" : "Show password"
+                    }
+                    disabled={loading || success}
+                  >
+                    <Ionicons
+                      name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color="#64748B"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Password Requirements Card */}
+              <PasswordRequirementsCard
+                password={newPassword}
+                showErrors={Boolean(error)}
+              />
+
+              {/* Reset Password Action Button */}
+              <TouchableOpacity
+                style={[styles.primaryActionBtn, loading && styles.primaryActionBtnLoading]}
+                onPress={handleResetPassword}
+                disabled={loading || success}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={loading ? "Resetting password" : "Reset Password"}
+              >
+                {loading ? (
+                  <View style={styles.buttonLoadingRow}>
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text style={styles.primaryActionBtnText}>Resetting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryActionBtnText}>Reset Password</Text>
                 )}
               </TouchableOpacity>
 
-              {cooldown > 0 ? (
-                <Text style={styles.cooldownText}>Resend in {cooldown}s</Text>
-              ) : (
-                <TouchableOpacity onPress={handleResendCode} disabled={resending}>
-                  <Text style={styles.resendCodeLink}>
-                    {resending ? "Sending..." : "Resend Code"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+              {/* OR Divider */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-            {/* New Password Field */}
-            <View style={styles.passwordWrapper}>
-              <Input
-                label="New Password"
-                placeholder="At least 8 characters"
-                value={newPassword}
-                onChangeText={(text) => {
-                  setNewPassword(text);
-                  if (error) setError(null);
-                }}
-                onFocus={() => setFocusedField("password")}
-                onBlur={() => setFocusedField(null)}
-                secureTextEntry={!showPassword}
-                style={[
-                  styles.inputField,
-                  styles.passwordInput,
-                  focusedField === "password" && styles.inputFocused,
-                ]}
-                autoCapitalize="none"
-                editable={!loading && !success}
-              />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword(!showPassword)}
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                disabled={loading || success}
-              >
-                <Text style={styles.eyeIcon}>{showPassword ? "🙈" : "👁️"}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Confirm New Password Field */}
-            <View style={styles.passwordWrapper}>
-              <Input
-                label="Confirm New Password"
-                placeholder="Re-enter your new password"
-                value={confirmNewPassword}
-                onChangeText={(text) => {
-                  setConfirmNewPassword(text);
-                  if (error) setError(null);
-                }}
-                onFocus={() => setFocusedField("confirmPassword")}
-                onBlur={() => setFocusedField(null)}
-                secureTextEntry={!showConfirmPassword}
-                style={[
-                  styles.inputField,
-                  styles.passwordInput,
-                  focusedField === "confirmPassword" && styles.inputFocused,
-                ]}
-                autoCapitalize="none"
-                editable={!loading && !success}
-              />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                accessibilityRole="button"
-                accessibilityLabel={showConfirmPassword ? "Hide password" : "Show password"}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                disabled={loading || success}
-              >
-                <Text style={styles.eyeIcon}>{showConfirmPassword ? "🙈" : "👁️"}</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Button
-              title="Reset Password"
-              onPress={handleResetPassword}
-              variant="primary"
-              loading={loading}
-              disabled={loading || success}
-              style={styles.actionButton}
-            />
-
-            <View style={styles.secondaryActions}>
-              {onNavigateToForgotPassword ? (
-                <TouchableOpacity
-                  onPress={onNavigateToForgotPassword}
-                  accessibilityRole="button"
-                  accessibilityLabel="Request a new reset code"
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  disabled={loading || success}
-                >
-                  <Text style={styles.resendText}>Didn't receive a code? Request new code</Text>
-                </TouchableOpacity>
+              {/* Error Banner */}
+              {error ? (
+                <View style={styles.errorBanner} accessibilityRole="alert">
+                  <View style={styles.errorIconBadge}>
+                    <Text style={styles.errorExclamationText}>!</Text>
+                  </View>
+                  <Text style={styles.errorBannerText}>{error}</Text>
+                </View>
               ) : null}
 
-              <TouchableOpacity
-                onPress={onNavigateToLogin}
-                accessibilityRole="button"
-                accessibilityLabel="Return to login screen"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                disabled={loading}
-                style={styles.loginLinkTouchable}
-              >
-                <Text style={styles.linkText}>← Back to Login</Text>
-              </TouchableOpacity>
+              {/* Back to Verification Link */}
+              <View style={styles.backLinkRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setError(null);
+                    setIsCodeVerified(false);
+                  }}
+                  style={styles.backLinkTouchable}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Verification"
+                >
+                  <Ionicons name="chevron-back" size={16} color="#64748B" />
+                  <Text style={styles.backLinkText}>Back to Verification</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </Card>
+          ) : (
+            /* =======================================================
+               Stage 1: Verify Code / Recovery OTP (PDF Page 2 Reference)
+               ======================================================= */
+            <View>
+              {/* Header Branding */}
+              <AuthBrandHeader
+                title="Verify your code"
+                subtitle="Enter the verification code we sent to your email to continue resetting your password."
+                onBack={
+                  onNavigateToForgotPassword
+                    ? onNavigateToForgotPassword
+                    : onNavigateToLogin
+                }
+                backAccessibilityLabel="Back to Forgot Password"
+              />
+
+              {/* Masked Email Info Card */}
+              <View style={styles.emailCard}>
+                <View style={styles.emailIconWrapper}>
+                  <Ionicons name="mail-outline" size={20} color="#0D9488" />
+                </View>
+                <View>
+                  <Text style={styles.emailCardLabel}>We sent a 6-digit code to</Text>
+                  <Text style={styles.maskedEmailText}>{maskEmail(email)}</Text>
+                </View>
+              </View>
+
+              {/* 6-Digit OTP Boxes */}
+              <OtpCodeInput
+                value={code}
+                onChange={(val) => {
+                  setCode(val);
+                  if (error) setError(null);
+                }}
+                hasError={Boolean(error)}
+                disabled={verifyingCode}
+                onComplete={(completedCode) => {
+                  handleVerifyCode(completedCode);
+                }}
+              />
+
+              {/* Error Alert */}
+              {error ? (
+                <View style={styles.errorAlert} accessibilityRole="alert">
+                  <View style={styles.errorBadge}>
+                    <Text style={styles.errorExclamation}>!</Text>
+                  </View>
+                  <Text style={styles.errorAlertText}>{error}</Text>
+                </View>
+              ) : null}
+
+              {/* Verify Code Action Button */}
+              <TouchableOpacity
+                style={[
+                  styles.primaryActionBtn,
+                  (code.length !== 6 || verifyingCode) &&
+                    styles.primaryActionBtnDisabled,
+                ]}
+                onPress={() => handleVerifyCode()}
+                disabled={code.length !== 6 || verifyingCode}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  verifyingCode ? "Verifying code" : "Verify Code"
+                }
+              >
+                {verifyingCode ? (
+                  <View style={styles.buttonLoadingRow}>
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                      style={{ marginRight: 8 }}
+                    />
+                    <Text style={styles.primaryActionBtnText}>Verifying...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryActionBtnText}>Verify Code</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Resend Code Countdown */}
+              <View style={styles.resendContainer}>
+                <Text style={styles.resendText}>Didn't receive the code? </Text>
+                {cooldown > 0 ? (
+                  <Text style={styles.cooldownText}>
+                    Resend code in {formatCooldown(cooldown)}
+                  </Text>
+                ) : (
+                  <TouchableOpacity
+                    onPress={handleResendCode}
+                    disabled={resending}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Resend code"
+                  >
+                    <Text style={styles.resendActionText}>
+                      {resending ? "Sending..." : "Resend code"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* OR Divider */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Use a Different Email Link */}
+              {onNavigateToForgotPassword ? (
+                <View style={styles.centerLinkRow}>
+                  <TouchableOpacity
+                    onPress={onNavigateToForgotPassword}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Use a different email"
+                  >
+                    <Text style={styles.differentEmailText}>
+                      Use a different email
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {/* Security Information Card */}
+              <View style={styles.securityCard}>
+                <View style={styles.securityIconWrapper}>
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={22}
+                    color="#0D9488"
+                  />
+                </View>
+                <View style={styles.securityTextCol}>
+                  <Text style={styles.securityTitle}>For your security</Text>
+                  <Text style={styles.securitySubtitle}>
+                    Never share your verification code with anyone.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Back to Forgot Password Link */}
+              <View style={styles.backLinkRow}>
+                <TouchableOpacity
+                  onPress={
+                    onNavigateToForgotPassword
+                      ? onNavigateToForgotPassword
+                      : onNavigateToLogin
+                  }
+                  style={styles.backLinkTouchable}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Forgot Password"
+                >
+                  <Ionicons name="chevron-back" size={16} color="#64748B" />
+                  <Text style={styles.backLinkText}>Back to Forgot Password</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
-    backgroundColor: colors.background,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight ?? 24) + 8 : 8,
+    backgroundColor: "#F8FAFC",
   },
   keyboardContainer: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
+    paddingHorizontal: 20,
     flexGrow: 1,
-    justifyContent: "center",
   },
-  header: {
+
+  /* Field Groups */
+  fieldGroup: {
+    marginBottom: 16,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0F172A",
+    marginBottom: 6,
+  },
+  inputWrapper: {
+    flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.lg,
-    marginTop: spacing.sm,
+    height: 52,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    paddingHorizontal: 14,
   },
-  brandLogo: {
-    marginBottom: spacing.sm,
+  inputWrapperFocused: {
+    borderColor: "#0D9488",
+    backgroundColor: "#FFFFFF",
   },
-  title: {
-    ...typography.h1,
-    color: colors.primaryDark,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  subtitle: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
-    textAlign: "center",
-  },
-  card: {
-    padding: spacing.xl,
-    borderRadius: borderRadius.xl,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  formTitle: {
-    ...typography.h2,
-    color: colors.textPrimary,
-    fontWeight: "700",
-    marginBottom: spacing.xs,
-  },
-  formSubtitle: {
-    ...typography.body,
-    color: colors.textMuted,
-    marginBottom: spacing.lg,
-    lineHeight: 20,
-  },
-  errorBanner: {
+  inputWrapperError: {
+    borderColor: "#DC2626",
     backgroundColor: "#FEF2F2",
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.lg,
-    borderWidth: 1.5,
-    borderColor: colors.error,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
   },
-  errorIcon: {
-    fontSize: 18,
+  inputLeftIcon: {
+    marginRight: 10,
   },
-  errorBannerText: {
-    ...typography.body,
-    color: colors.error,
-    fontWeight: "600",
+  textInput: {
     flex: 1,
-  },
-  successBanner: {
-    backgroundColor: "#F0FDF4",
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.lg,
-    borderWidth: 1.5,
-    borderColor: "#10B981",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  successIcon: {
-    fontSize: 18,
-  },
-  successBannerText: {
-    ...typography.body,
-    color: "#065F46",
-    fontWeight: "600",
-    flex: 1,
-  },
-  inputField: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1.5,
-    borderRadius: borderRadius.md,
-    minHeight: accessibility.minTouchTarget,
-  },
-  codeInput: {
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    letterSpacing: 6,
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  inputFocused: {
-    borderColor: colors.primary,
-    borderWidth: 2,
-    backgroundColor: "#F0FDFA",
-  },
-  passwordWrapper: {
-    position: "relative",
-  },
-  passwordInput: {
-    paddingRight: 52,
+    fontSize: 15,
+    color: "#0F172A",
+    paddingVertical: 0,
   },
   eyeButton: {
-    position: "absolute",
-    right: 4,
-    top: 32,
-    width: accessibility.minTouchTarget,
-    height: accessibility.minTouchTarget,
+    padding: 6,
+    marginLeft: 6,
+  },
+
+  /* Masked Email Info Card */
+  emailCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDFA",
+    borderColor: "#CCFBF1",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    gap: 12,
+  },
+  emailIconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#CCFBF1",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 10,
-    elevation: 10,
   },
-  eyeIcon: {
-    fontSize: 20,
+  emailCardLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    marginBottom: 2,
   },
-  actionButton: {
-    marginTop: spacing.md,
-    minHeight: accessibility.minTouchTarget,
+  maskedEmailText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0F172A",
   },
-  secondaryActions: {
+
+  /* Error Alert */
+  errorAlert: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: spacing.lg,
-    gap: spacing.md,
+    justifyContent: "center",
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FCA5A5",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 10,
+    gap: 8,
   },
-  resendText: {
-    ...typography.caption,
-    color: colors.primaryDark,
+  errorBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  errorExclamation: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 14,
+  },
+  errorAlertText: {
+    fontSize: 13,
+    color: "#DC2626",
+    fontWeight: "500",
+  },
+
+  /* Primary Action Button */
+  primaryActionBtn: {
+    height: 52,
+    backgroundColor: "#0D9488",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 14,
+    shadowColor: "#0D9488",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  primaryActionBtnDisabled: {
+    backgroundColor: "#99F6E4",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  primaryActionBtnLoading: {
+    opacity: 0.8,
+  },
+  primaryActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 16,
     fontWeight: "600",
   },
-  loginLinkTouchable: {
-    paddingVertical: spacing.xs,
-  },
-  linkText: {
-    ...typography.body,
-    fontWeight: "700",
-    color: colors.primaryDark,
-  },
-  codeSuccessBox: {
-    backgroundColor: "#F0FDF4",
-    borderWidth: 1,
-    borderColor: "#86EFAC",
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  codeSuccessText: {
-    ...typography.caption,
-    color: "#15803D",
-    lineHeight: 18,
-  },
-  codeActionRow: {
+  buttonLoadingRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.md,
   },
-  verifyCodeBtn: {
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.sm,
+
+  /* Resend Container */
+  resendContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 18,
   },
-  verifyCodeBtnDisabled: {
-    backgroundColor: colors.borderLight,
-  },
-  verifyCodeBtnText: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: "#fff",
+  resendText: {
+    fontSize: 14,
+    color: "#64748B",
   },
   cooldownText: {
-    ...typography.caption,
-    color: colors.textMuted,
+    fontSize: 14,
+    color: "#64748B",
   },
-  resendCodeLink: {
-    ...typography.caption,
-    color: colors.primary,
+  resendActionText: {
+    fontSize: 14,
+    color: "#0D9488",
     fontWeight: "700",
+  },
+
+  /* OR Divider */
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 18,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E2E8F0",
+  },
+  dividerText: {
+    fontSize: 12,
+    color: "#94A3B8",
+    fontWeight: "600",
+    paddingHorizontal: 12,
+  },
+
+  /* Center Link */
+  centerLinkRow: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  differentEmailText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0D9488",
+  },
+
+  /* Security Info Card */
+  securityCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDFA",
+    borderColor: "#CCFBF1",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 6,
+    gap: 12,
+  },
+  securityIconWrapper: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#CCFBF1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  securityTextCol: {
+    flex: 1,
+  },
+  securityTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 2,
+  },
+  securitySubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    lineHeight: 16,
+  },
+
+  /* Back Link Row */
+  backLinkRow: {
+    alignItems: "center",
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  backLinkTouchable: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  backLinkText: {
+    fontSize: 14,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+
+  /* Error Banner */
+  errorBanner: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FCA5A5",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  errorIconBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  errorExclamationText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  errorBannerText: {
+    fontSize: 13,
+    color: "#DC2626",
+    fontWeight: "500",
+    flex: 1,
+  },
+
+  /* Success Banner */
+  successBanner: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#86EFAC",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    gap: 8,
+  },
+  successBannerText: {
+    fontSize: 13,
+    color: "#16A34A",
+    fontWeight: "600",
+    flex: 1,
   },
 });

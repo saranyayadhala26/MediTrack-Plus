@@ -1,8 +1,8 @@
 /**
- * Accessible Text Input Component with Label and Validation Support
+ * Accessible, Standardized MediTrack+ Text Input Component
  */
 
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -10,14 +10,17 @@ import {
   StyleSheet,
   TextInputProps,
   ViewStyle,
+  StyleProp,
 } from "react-native";
 import { colors, typography, borderRadius, accessibility, spacing } from "../../constants/theme";
 
-interface InputProps extends TextInputProps {
+export interface InputProps extends TextInputProps {
   label: string;
   error?: string;
   helperText?: string;
-  containerStyle?: ViewStyle;
+  containerStyle?: StyleProp<ViewStyle>;
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -26,21 +29,41 @@ export const Input: React.FC<InputProps> = ({
   helperText,
   containerStyle,
   style,
+  leftIcon,
+  rightIcon,
+  onFocus,
+  onBlur,
   ...rest
 }) => {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
     <View style={[styles.container, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
+      <View
         style={[
-          styles.input,
-          error ? styles.inputError : null,
-          style,
+          styles.inputWrapper,
+          isFocused && styles.inputWrapperFocused,
+          error ? styles.inputWrapperError : null,
         ]}
-        placeholderTextColor={colors.textMuted}
-        accessibilityLabel={label}
-        {...rest}
-      />
+      >
+        {leftIcon ? <View style={styles.leftIconContainer}>{leftIcon}</View> : null}
+        <TextInput
+          style={[styles.input, style]}
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel={label}
+          onFocus={(e) => {
+            setIsFocused(true);
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setIsFocused(false);
+            onBlur?.(e);
+          }}
+          {...rest}
+        />
+        {rightIcon ? <View style={styles.rightIconContainer}>{rightIcon}</View> : null}
+      </View>
       {error ? (
         <Text style={styles.errorText}>{error}</Text>
       ) : helperText ? (
@@ -55,33 +78,51 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   label: {
-    ...typography.body,
-    fontWeight: "600",
+    ...typography.bodySecondary,
+    fontWeight: "700",
     color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
-  input: {
-    minHeight: accessibility.minTouchTarget,
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
     borderRadius: borderRadius.md,
+    minHeight: accessibility.minTouchTarget,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  },
+  inputWrapperFocused: {
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+    backgroundColor: colors.primarySubtle,
+  },
+  inputWrapperError: {
+    borderColor: colors.error,
+    borderWidth: 1.5,
+  },
+  input: {
+    flex: 1,
     ...typography.body,
     color: colors.textPrimary,
+    paddingVertical: spacing.sm,
   },
-  inputError: {
-    borderColor: colors.error,
+  leftIconContainer: {
+    marginRight: spacing.sm,
+  },
+  rightIconContainer: {
+    marginLeft: spacing.sm,
   },
   errorText: {
     ...typography.caption,
     color: colors.error,
     marginTop: spacing.xs,
+    fontWeight: "500",
   },
   helperText: {
     ...typography.caption,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: spacing.xs,
   },
 });

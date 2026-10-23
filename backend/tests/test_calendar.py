@@ -137,6 +137,7 @@ async def test_weekly_schedule_occurrence():
                 "time": "09:00",
                 "frequencyType": "weekly",
                 "daysOfWeek": [1, 3],
+                "startDate": "2026-09-10",
                 "enabled": True,
             },
             headers=headers,
@@ -175,6 +176,7 @@ async def test_custom_schedule_occurrence():
                 "medicineId": med_id,
                 "time": "10:00",
                 "frequencyType": "custom",
+                "startDate": "2026-09-10",
                 "dates": ["2026-09-15", "2026-09-22"],
                 "enabled": True,
             },
@@ -806,7 +808,13 @@ async def test_calendar_day_status_aggregate():
 
         sched_res = await client.post(
             "/api/v1/schedules",
-            json={"medicineId": med_id, "time": "07:00", "frequencyType": "daily", "enabled": True},
+            json={
+                "medicineId": med_id,
+                "time": "07:00",
+                "frequencyType": "daily",
+                "startDate": "2026-09-10",
+                "enabled": True,
+            },
             headers=headers,
         )
         sched_id = sched_res.json()["id"]

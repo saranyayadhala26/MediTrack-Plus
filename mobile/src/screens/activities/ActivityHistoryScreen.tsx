@@ -1,44 +1,168 @@
 /**
- * Activity History & Dose Tracking Screen (Phase 7).
- * Displays full clinical intake audit logs, action badges, skip reasons,
- * snooze occurrences, and patient adherence summary computed against real schedules.
+ * Medication Activity & Dose History Screen for MediTrack+
+ * Redesigned to match the finalized MediTrack+ UI design reference (page 27 of ui.pdf).
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
+  Platform,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getAdherenceSummary, getMedicationActivities } from "../../api/activities";
-import { Card } from "../../components/common/Card";
-import { config } from "../../constants/config";
-import { borderRadius, colors, spacing, typography } from "../../constants/theme";
-import { useAuth } from "../../context/AuthContext";
-import { AdherenceSummary, MedicationActionType, MedicationActivity } from "../../types";
+import { colors, spacing } from "../../constants/theme";
+import { AdherenceSummary, MedicationActivity } from "../../types";
+import { EmptyState, InlineError, LoadingState } from "../../components/common";
 
-type ActionFilter = "ALL" | MedicationActionType;
+interface ActivityHistoryScreenProps {
+  onBack?: () => void;
+}
 
-export const ActivityHistoryScreen: React.FC = () => {
-  const { user } = useAuth();
-  const isCaregiver = user?.role === "caregiver";
+type PeriodFilter = "All" | "Today" | "Yesterday" | "This week" | "This month";
 
+const FILTER_OPTIONS: PeriodFilter[] = [
+  "All",
+  "Today",
+  "Yesterday",
+  "This week",
+  "This month",
+];
+
+const PILL_COLORS = [
+  { bg: "#DCFCE7", color: "#16A34A" }, // Green
+  { bg: "#E0F2FE", color: "#0284C7" }, // Blue
+  { bg: "#FEF3C7", color: "#D97706" }, // Amber
+  { bg: "#FEE2E2", color: "#DC2626" }, // Red
+  { bg: "#F3E8FF", color: "#9333EA" }, // Purple
+];
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function formatTime(time24?: string): string {
+  if (!time24) return "";
+  const parts = time24.split(":");
+  if (parts.length < 2) return time24;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return time24;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const displayH = h % 12 || 12;
+  const displayM = String(m).padStart(2, "0");
+  return `${displayH}:${displayM} ${ampm}`;
+}
+
+function formatTimeFromIso(isoString?: string): string {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const ampm = h >= 12 ? "PM" : "AM";
+    const displayH = h % 12 || 12;
+    const displayM = String(m).padStart(2, "0");
+    return `${displayH}:${displayM} ${ampm}`;
+  } catch {
+    return isoString;
+  }
+}
+
+function formatSummaryDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-").map((v) => parseInt(v, 10));
+  if (parts.length !== 3) return dateStr;
+  const [, month, day] = parts;
+  const year = parts[0];
+  return `${day} ${SHORT_MONTHS[month - 1]} ${year}`;
+}
+
+function formatDateSectionTitle(
+  dateStr: string,
+  todayStr: string,
+  yesterdayStr: string
+): string {
+  if (!dateStr) return "";
+  const parts = dateStr.split("-").map((v) => parseInt(v, 10));
+  if (parts.length !== 3) return dateStr;
+  const [year, month, day] = parts;
+  const formattedDate = `${day} ${MONTH_NAMES[month - 1]} ${year}`;
+
+  if (dateStr === todayStr) {
+    return `Today, ${formattedDate}`;
+  }
+  if (dateStr === yesterdayStr) {
+    return `Yesterday, ${formattedDate}`;
+  }
+  return formattedDate;
+}
+
+export const ActivityHistoryScreen: React.FC<ActivityHistoryScreenProps> = ({
+  onBack,
+}) => {
   const [activities, setActivities] = useState<MedicationActivity[]>([]);
   const [summary, setSummary] = useState<AdherenceSummary | null>(null);
-  const [filter, setFilter] = useState<ActionFilter>("ALL");
+  const [selectedFilter, setSelectedFilter] = useState<PeriodFilter>("All");
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Compute reference dates
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+
+  const yDate = new Date();
+  yDate.setDate(yDate.getDate() - 1);
+  const yesterdayStr = yDate.toISOString().split("T")[0];
+
+  // Monday of this week
+  const dayOfWeek = (now.getDay() + 6) % 7; // Monday = 0
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - dayOfWeek);
+  const startOfWeekStr = startOfWeek.toISOString().split("T")[0];
+
+  // 1st of this month
+  const startOfMonthStr = `${now.getFullYear()}-${String(
+    now.getMonth() + 1
+  ).padStart(2, "0")}-01`;
+
   const loadData = useCallback(async () => {
     setError(null);
-    const todayStr = new Date().toISOString().split("T")[0];
     try {
       const [acts, sum] = await Promise.all([
         getMedicationActivities(),
@@ -46,13 +170,13 @@ export const ActivityHistoryScreen: React.FC = () => {
       ]);
       setActivities(acts || []);
       setSummary(sum || null);
-    } catch (err: any) {
+    } catch {
       setError("Failed to load activity logs. Pull to retry.");
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [todayStr]);
 
   useEffect(() => {
     loadData();
@@ -63,187 +187,408 @@ export const ActivityHistoryScreen: React.FC = () => {
     loadData();
   };
 
-  const filteredActivities = activities.filter((act) => {
-    if (filter === "ALL") return true;
-    return act.action === filter;
-  });
+  // Filter activities by selected period
+  const filteredActivities = useMemo(() => {
+    return activities.filter((act) => {
+      const actDate = act.scheduledDate || act.actionTime.split("T")[0];
+      switch (selectedFilter) {
+        case "Today":
+          return actDate === todayStr;
+        case "Yesterday":
+          return actDate === yesterdayStr;
+        case "This week":
+          return actDate >= startOfWeekStr && actDate <= todayStr;
+        case "This month":
+          return actDate >= startOfMonthStr && actDate <= todayStr;
+        case "All":
+        default:
+          return true;
+      }
+    });
+  }, [
+    activities,
+    selectedFilter,
+    todayStr,
+    yesterdayStr,
+    startOfWeekStr,
+    startOfMonthStr,
+  ]);
 
-  const renderItem = ({ item }: { item: MedicationActivity }) => {
-    const isTaken = item.action === "Taken";
-    const isSkipped = item.action === "Skipped";
-    const isSnoozed = item.action === "Snoozed";
+  // Group filtered activities chronologically by date
+  const groupedActivities = useMemo(() => {
+    // Sort activities by date descending, then time descending
+    const sorted = [...filteredActivities].sort((a, b) => {
+      const dateA = a.scheduledDate || a.actionTime.split("T")[0];
+      const dateB = b.scheduledDate || b.actionTime.split("T")[0];
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return (b.scheduledTime || "").localeCompare(a.scheduledTime || "");
+    });
 
-    return (
-      <Card style={styles.activityCard}>
-        <View style={styles.cardHeader}>
-          <View style={styles.medInfo}>
-            <Text style={styles.medicineName}>
-              {item.medicineName || "Prescribed Medicine"}
-            </Text>
-            {item.dosage ? (
-              <Text style={styles.dosageText}>
-                {item.dosage} {item.dosageUnit}
-              </Text>
-            ) : null}
-          </View>
+    const groups: Array<{
+      dateStr: string;
+      title: string;
+      items: MedicationActivity[];
+    }> = [];
 
-          {/* Action Badge */}
-          <View
-            style={[
-              styles.badge,
-              isTaken && styles.takenBadge,
-              isSkipped && styles.skippedBadge,
-              isSnoozed && styles.snoozedBadge,
-            ]}
-          >
-            <Text
-              style={[
-                styles.badgeText,
-                isTaken && styles.takenBadgeText,
-                isSkipped && styles.skippedBadgeText,
-                isSnoozed && styles.snoozedBadgeText,
-              ]}
-            >
-              {isTaken && "✓ Taken"}
-              {isSkipped && "✕ Skipped"}
-              {isSnoozed && "⏰ Snoozed"}
-            </Text>
-          </View>
-        </View>
+    sorted.forEach((act) => {
+      const dateStr = act.scheduledDate || act.actionTime.split("T")[0];
+      let group = groups.find((g) => g.dateStr === dateStr);
+      if (!group) {
+        group = {
+          dateStr,
+          title: formatDateSectionTitle(dateStr, todayStr, yesterdayStr),
+          items: [],
+        };
+        groups.push(group);
+      }
+      group.items.push(act);
+    });
 
-        {/* Schedule vs Action Timing */}
-        <View style={styles.timingRow}>
-          <Text style={styles.scheduledTiming}>
-            📅 Scheduled: {item.scheduledDate} at {item.scheduledTime}
-          </Text>
-          <Text style={styles.actionTiming}>
-            Logged:{" "}
-            {new Date(item.actionTime).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </Text>
-        </View>
+    return groups;
+  }, [filteredActivities, todayStr, yesterdayStr]);
 
-        {/* Previous Snooze Context */}
-        {item.wasSnoozed && (
-          <View style={styles.snoozeContextBanner}>
-            <Text style={styles.snoozeContextText}>
-              ⏳ Previously snoozed {item.snoozeCount ? `${item.snoozeCount} time(s)` : ""} before intake
-            </Text>
-          </View>
-        )}
+  // Summary counts for the selected period
+  const takenCount = useMemo(() => {
+    if (selectedFilter === "Today" && summary?.takenCount !== undefined) {
+      return summary.takenCount;
+    }
+    return filteredActivities.filter((a) => a.action === "Taken").length;
+  }, [filteredActivities, selectedFilter, summary]);
 
-        {/* Skip Reason */}
-        {isSkipped && item.skipReason ? (
-          <View style={styles.skipReasonBox}>
-            <Text style={styles.skipReasonLabel}>Skip Reason:</Text>
-            <Text style={styles.skipReasonValue}>{item.skipReason}</Text>
-          </View>
-        ) : null}
-      </Card>
-    );
-  };
+  const skippedCount = useMemo(() => {
+    if (selectedFilter === "Today" && summary?.skippedCount !== undefined) {
+      return summary.skippedCount;
+    }
+    return filteredActivities.filter((a) => a.action === "Skipped").length;
+  }, [filteredActivities, selectedFilter, summary]);
+
+  const snoozedCount = useMemo(() => {
+    if (selectedFilter === "Today" && summary?.snoozedCount !== undefined) {
+      return summary.snoozedCount;
+    }
+    return filteredActivities.filter((a) => a.action === "Snoozed").length;
+  }, [filteredActivities, selectedFilter, summary]);
+
+  const pendingCount = useMemo(() => {
+    if (selectedFilter === "Today" && summary?.pendingCount !== undefined) {
+      return summary.pendingCount;
+    }
+    const scheduled = summary?.totalScheduled ?? 0;
+    const handled = takenCount + skippedCount + snoozedCount;
+    return Math.max(0, scheduled - handled);
+  }, [selectedFilter, summary, takenCount, skippedCount, snoozedCount]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Screen Header */}
+      {/* 1. Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Dose Activity & History</Text>
-        <Text style={styles.headerSubtitle}>
-          {isCaregiver ? "Caregiver Patient Activity Log" : "Personal Medication Adherence Records"}
-        </Text>
+        {onBack ? (
+          <TouchableOpacity
+            onPress={onBack}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+        ) : null}
+        <View style={styles.headerTitleCol}>
+          <Text style={styles.headerTitle}>Activity</Text>
+          <Text style={styles.headerSubtitle}>Your medication history.</Text>
+        </View>
       </View>
 
-      <FlatList
-        data={filteredActivities}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+      {/* 2. Filter Controls Row */}
+      <View style={styles.filterBarContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          {FILTER_OPTIONS.map((f) => {
+            const isSelected = selectedFilter === f;
+            return (
+              <TouchableOpacity
+                key={f}
+                style={[
+                  styles.filterPill,
+                  isSelected ? styles.filterPillSelected : styles.filterPillUnselected,
+                ]}
+                onPress={() => setSelectedFilter(f)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${f} filter`}
+              >
+                {f === "This month" ? (
+                  <Ionicons
+                    name="calendar-outline"
+                    size={14}
+                    color={isSelected ? "#FFFFFF" : colors.textSecondary}
+                    style={{ marginRight: 5 }}
+                  />
+                ) : null}
+                <Text
+                  style={[
+                    styles.filterPillText,
+                    isSelected
+                      ? styles.filterPillTextSelected
+                      : styles.filterPillTextUnselected,
+                  ]}
+                >
+                  {f}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} colors={[colors.primary]} />
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
         }
-        ListHeaderComponent={
-          <>
-            {/* Medical Disclaimer */}
-            <View style={styles.disclaimerBox}>
-              <Text style={styles.disclaimerText}>
-                ⚠️ {config.medicalDisclaimer}
-              </Text>
+      >
+        {/* Error message */}
+        {error ? (
+          <InlineError
+            title="Failed to load activity logs"
+            subtitle="Pull down to retry."
+          />
+        ) : null}
+
+        {/* 3. Daily / Period Summary Card */}
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryLeftCol}>
+            <Text style={styles.summaryPeriodTitle}>{selectedFilter}</Text>
+            <Text style={styles.summaryDateText}>{formatSummaryDate(todayStr)}</Text>
+          </View>
+
+          <View style={styles.summaryDivider} />
+
+          <View style={styles.summaryTilesRow}>
+            {/* Taken */}
+            <View style={[styles.summaryTile, styles.tileTaken]}>
+              <View style={styles.tileCountRow}>
+                <Ionicons
+                  name="checkmark"
+                  size={13}
+                  color="#16A34A"
+                  style={{ marginRight: 2 }}
+                />
+                <Text style={[styles.tileCountText, { color: "#16A34A" }]}>
+                  {takenCount}
+                </Text>
+              </View>
+              <Text style={[styles.tileLabelText, { color: "#16A34A" }]}>Taken</Text>
             </View>
 
-            {/* Adherence Summary Card */}
-            {summary && (
-              <Card style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Today's Adherence Summary</Text>
-                <View style={styles.statsGrid}>
-                  <View style={styles.statBox}>
-                    <Text style={styles.statValue}>{summary.adherencePercentage}%</Text>
-                    <Text style={styles.statLabel}>Adherence</Text>
-                  </View>
+            {/* Pending */}
+            <View style={[styles.summaryTile, styles.tilePending]}>
+              <View style={styles.tileCountRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={13}
+                  color="#D97706"
+                  style={{ marginRight: 2 }}
+                />
+                <Text style={[styles.tileCountText, { color: "#D97706" }]}>
+                  {pendingCount}
+                </Text>
+              </View>
+              <Text style={[styles.tileLabelText, { color: "#D97706" }]}>Pending</Text>
+            </View>
 
-                  <View style={styles.statBox}>
-                    <Text style={[styles.statValue, { color: colors.taken }]}>{summary.takenCount}</Text>
-                    <Text style={styles.statLabel}>Taken</Text>
-                  </View>
+            {/* Skipped */}
+            <View style={[styles.summaryTile, styles.tileSkipped]}>
+              <View style={styles.tileCountRow}>
+                <Ionicons
+                  name="close"
+                  size={13}
+                  color="#DC2626"
+                  style={{ marginRight: 2 }}
+                />
+                <Text style={[styles.tileCountText, { color: "#DC2626" }]}>
+                  {skippedCount}
+                </Text>
+              </View>
+              <Text style={[styles.tileLabelText, { color: "#DC2626" }]}>Skipped</Text>
+            </View>
 
-                  <View style={styles.statBox}>
-                    <Text style={[styles.statValue, { color: colors.skipped }]}>{summary.skippedCount}</Text>
-                    <Text style={styles.statLabel}>Skipped</Text>
-                  </View>
+            {/* Snoozed */}
+            <View style={[styles.summaryTile, styles.tileSnoozed]}>
+              <View style={styles.tileCountRow}>
+                <Ionicons
+                  name="reload-outline"
+                  size={13}
+                  color="#0284C7"
+                  style={{ marginRight: 2 }}
+                />
+                <Text style={[styles.tileCountText, { color: "#0284C7" }]}>
+                  {snoozedCount}
+                </Text>
+              </View>
+              <Text style={[styles.tileLabelText, { color: "#0284C7" }]}>Snoozed</Text>
+            </View>
+          </View>
+        </View>
 
-                  <View style={styles.statBox}>
-                    <Text style={[styles.statValue, { color: colors.primaryDark }]}>{summary.totalScheduled}</Text>
-                    <Text style={styles.statLabel}>Scheduled</Text>
-                  </View>
+        {/* 4 & 5. Activity History Grouped by Date */}
+        {isLoading && !isRefreshing ? (
+          <LoadingState skeleton={true} skeletonVariant="rows" skeletonCount={5} />
+        ) : groupedActivities.length === 0 ? (
+          /* 6. Empty State */
+          <EmptyState
+            variant="activity"
+            description={
+              selectedFilter === "All"
+                ? "Your medication actions will appear here after taking, skipping, or snoozing doses."
+                : `No medication activity recorded for ${selectedFilter.toLowerCase()}.`
+            }
+          />
+        ) : (
+          groupedActivities.map((group) => (
+            <View key={group.dateStr} style={styles.dateGroupContainer}>
+              {/* Date Section Header */}
+              <View style={styles.dateSectionHeaderRow}>
+                <Text style={styles.dateSectionTitle}>{group.title}</Text>
+                <View style={styles.activitiesBadge}>
+                  <Text style={styles.activitiesBadgeText}>
+                    {group.items.length}{" "}
+                    {group.items.length === 1 ? "activity" : "activities"}
+                  </Text>
                 </View>
-              </Card>
-            )}
+              </View>
 
-            {/* Filter Tabs */}
-            <View style={styles.filterBar}>
-              {(["ALL", "Taken", "Skipped", "Snoozed"] as ActionFilter[]).map((f) => {
-                const isSelected = filter === f;
+              {/* Activity Cards */}
+              {group.items.map((act, idx) => {
+                const pillTheme = PILL_COLORS[idx % PILL_COLORS.length];
+                const isTaken = act.action === "Taken";
+                const isSkipped = act.action === "Skipped";
+                const isSnoozed = act.action === "Snoozed";
+
                 return (
-                  <TouchableOpacity
-                    key={f}
-                    style={[styles.filterTab, isSelected && styles.filterTabSelected]}
-                    onPress={() => setFilter(f)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: isSelected }}
+                  <View
+                    key={`${act.id || act.scheduleId}-${idx}`}
+                    style={styles.activityCard}
                   >
-                    <Text style={[styles.filterTabText, isSelected && styles.filterTabTextSelected]}>
-                      {f}
+                    {/* Time */}
+                    <Text style={styles.activityTimeText}>
+                      {formatTime(act.scheduledTime)}
                     </Text>
-                  </TouchableOpacity>
+
+                    {/* Pill Circle */}
+                    <View
+                      style={[
+                        styles.activityPillCircle,
+                        { backgroundColor: pillTheme.bg },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name="pill"
+                        size={18}
+                        color={pillTheme.color}
+                      />
+                    </View>
+
+                    {/* Info */}
+                    <View style={styles.activityInfoCol}>
+                      <Text style={styles.activityMedName} numberOfLines={1}>
+                        {act.medicineName || "Prescribed Medicine"}
+                      </Text>
+                      <Text style={styles.activityDosageText} numberOfLines={1}>
+                        {act.dosage} {act.dosageUnit}{" "}
+                        {act.dosageUnit ? `• 1 ${act.dosageUnit}` : ""}
+                      </Text>
+
+                      {/* Detail subline */}
+                      <Text style={styles.activitySubDetailText} numberOfLines={1}>
+                        {isTaken ? (
+                          `Scheduled ${formatTime(act.scheduledTime)} | Taken at ${formatTimeFromIso(act.actionTime)}`
+                        ) : isSnoozed ? (
+                          `Scheduled ${formatTime(act.scheduledTime)} | Snoozed to ${formatTimeFromIso(act.actionTime)}`
+                        ) : isSkipped ? (
+                          `Scheduled ${formatTime(act.scheduledTime)}${act.skipReason ? ` | Reason: ${act.skipReason}` : ""}`
+                        ) : (
+                          `Scheduled ${formatTime(act.scheduledTime)}`
+                        )}
+                      </Text>
+                    </View>
+
+                    {/* Status Pill */}
+                    <View
+                      style={[
+                        styles.statusPill,
+                        isTaken
+                          ? styles.statusPillTaken
+                          : isSkipped
+                          ? styles.statusPillSkipped
+                          : isSnoozed
+                          ? styles.statusPillSnoozed
+                          : styles.statusPillPending,
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          isTaken
+                            ? "checkmark-circle"
+                            : isSkipped
+                            ? "close-circle"
+                            : isSnoozed
+                            ? "reload-outline"
+                            : "time-outline"
+                        }
+                        size={13}
+                        color={
+                          isTaken
+                            ? "#16A34A"
+                            : isSkipped
+                            ? "#DC2626"
+                            : isSnoozed
+                            ? "#0284C7"
+                            : "#D97706"
+                        }
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          isTaken
+                            ? styles.statusPillTextTaken
+                            : isSkipped
+                            ? styles.statusPillTextSkipped
+                            : isSnoozed
+                            ? styles.statusPillTextSnoozed
+                            : styles.statusPillTextPending,
+                        ]}
+                      >
+                        {act.action}
+                      </Text>
+                    </View>
+
+                    {/* Navigation chevron */}
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color="#94A3B8"
+                      style={{ marginLeft: 6 }}
+                    />
+                  </View>
                 );
               })}
             </View>
-
-            {error ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorBannerText}>{error}</Text>
-              </View>
-            ) : null}
-          </>
-        }
-        ListEmptyComponent={
-          !isLoading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No Activity Recorded</Text>
-              <Text style={styles.emptyText}>
-                {filter === "ALL"
-                  ? "As medication doses are taken, snoozed, or skipped, logs will appear here."
-                  : `No activities found with status "${filter}".`}
-              </Text>
-            </View>
-          ) : (
-            <ActivityIndicator style={{ marginTop: spacing.xl }} size="large" color={colors.primary} />
-          )
-        }
-      />
+          ))
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -251,207 +596,325 @@ export const ActivityHistoryScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#F8FAFC",
   },
+
+  /* 1. Header */
   header: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.lg,
-    paddingTop: (StatusBar.currentHeight || 24) + spacing.md,
-    paddingBottom: spacing.md,
+    backgroundColor: "#FFFFFF",
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 8 : 12,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  backButton: {
+    marginRight: 12,
+  },
+  headerTitleCol: {
+    flex: 1,
   },
   headerTitle: {
-    ...typography.h2,
-    color: "#FFFFFF",
-    fontWeight: "700",
+    fontSize: 24,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    ...typography.caption,
-    color: colors.primaryLight,
-    marginTop: 2,
-  },
-  listContent: {
-    padding: spacing.md,
-  },
-  disclaimerBox: {
-    backgroundColor: colors.surfaceSubtle,
-    padding: spacing.sm,
-    borderRadius: borderRadius.sm,
-    marginBottom: spacing.md,
-  },
-  disclaimerText: {
-    ...typography.small,
+    fontSize: 14,
     color: colors.textSecondary,
-    lineHeight: 16,
-  },
-  summaryCard: {
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  summaryTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  statsGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  statBox: {
-    flex: 1,
-    alignItems: "center",
-  },
-  statValue: {
-    ...typography.h2,
-    color: colors.primary,
-    fontWeight: "800",
-  },
-  statLabel: {
-    ...typography.small,
-    color: colors.textMuted,
     marginTop: 2,
   },
-  filterBar: {
-    flexDirection: "row",
-    gap: spacing.xs,
-    marginBottom: spacing.md,
+
+  /* 2. Filter Bar */
+  filterBarContainer: {
+    backgroundColor: "#FFFFFF",
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
-  filterTab: {
-    flex: 1,
-    paddingVertical: spacing.xs,
+  filterScrollContent: {
+    paddingHorizontal: 20,
+    gap: 8,
+    flexDirection: "row",
     alignItems: "center",
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.surfaceSubtle,
+  },
+  filterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    minHeight: 34,
+  },
+  filterPillSelected: {
+    backgroundColor: colors.primary,
+  },
+  filterPillUnselected: {
+    backgroundColor: "#F1F5F9",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#E2E8F0",
   },
-  filterTabSelected: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
+  filterPillText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
-  filterTabText: {
-    ...typography.caption,
+  filterPillTextSelected: {
+    color: "#FFFFFF",
+  },
+  filterPillTextUnselected: {
     color: colors.textSecondary,
   },
-  filterTabTextSelected: {
-    color: colors.primaryDark,
-    fontWeight: "700",
+
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 40,
   },
+
+  /* Error Banner */
   errorBanner: {
-    backgroundColor: colors.skippedLight,
-    padding: spacing.sm,
-    borderRadius: borderRadius.sm,
-    marginBottom: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FEE2E2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
   },
   errorBannerText: {
-    ...typography.small,
-    color: colors.error,
-    fontWeight: "600",
+    flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: "500",
   },
-  activityCard: {
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+
+  /* 3. Summary Card */
+  summaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  cardHeader: {
+  summaryLeftCol: {
+    minWidth: 80,
+  },
+  summaryPeriodTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  summaryDateText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  summaryDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: "#E2E8F0",
+    marginHorizontal: 10,
+  },
+  summaryTilesRow: {
+    flex: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: spacing.xs,
+    gap: 6,
   },
-  medInfo: {
+  summaryTile: {
     flex: 1,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  medicineName: {
-    ...typography.h3,
-    color: colors.textPrimary,
+  tileTaken: {
+    backgroundColor: "#DCFCE7",
   },
-  dosageText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
+  tilePending: {
+    backgroundColor: "#FEF3C7",
   },
-  badge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: borderRadius.sm,
+  tileSkipped: {
+    backgroundColor: "#FEE2E2",
   },
-  takenBadge: {
-    backgroundColor: colors.takenLight,
+  tileSnoozed: {
+    backgroundColor: "#E0F2FE",
   },
-  takenBadgeText: {
-    ...typography.small,
-    color: colors.taken,
-    fontWeight: "700",
-  },
-  skippedBadge: {
-    backgroundColor: colors.skippedLight,
-  },
-  skippedBadgeText: {
-    ...typography.small,
-    color: colors.skipped,
-    fontWeight: "700",
-  },
-  snoozedBadge: {
-    backgroundColor: colors.snoozedLight,
-  },
-  snoozedBadgeText: {
-    ...typography.small,
-    color: colors.snoozed,
-    fontWeight: "700",
-  },
-  badgeText: {
-    ...typography.small,
-    fontWeight: "600",
-  },
-  timingRow: {
-    marginTop: spacing.xs,
-  },
-  scheduledTiming: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  actionTiming: {
-    ...typography.small,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  snoozeContextBanner: {
-    backgroundColor: colors.snoozedLight,
-    padding: spacing.xs,
-    borderRadius: borderRadius.sm,
-    marginTop: spacing.xs,
-  },
-  snoozeContextText: {
-    ...typography.small,
-    color: "#92400E",
-    fontWeight: "600",
-  },
-  skipReasonBox: {
-    backgroundColor: colors.skippedLight,
-    padding: spacing.xs,
-    borderRadius: borderRadius.sm,
-    marginTop: spacing.xs,
-  },
-  skipReasonLabel: {
-    ...typography.small,
-    color: colors.skipped,
-    fontWeight: "700",
-  },
-  skipReasonValue: {
-    ...typography.small,
-    color: colors.skipped,
-  },
-  emptyState: {
-    padding: spacing.xl,
+  tileCountRow: {
+    flexDirection: "row",
     alignItems: "center",
   },
-  emptyTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
+  tileCountText: {
+    fontSize: 14,
+    fontWeight: "800",
   },
-  emptyText: {
-    ...typography.body,
+  tileLabelText: {
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+
+  /* 4. Activity Groups */
+  dateGroupContainer: {
+    marginBottom: 16,
+  },
+  dateSectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  dateSectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  activitiesBadge: {
+    backgroundColor: "#CCFBF1",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  activitiesBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.primaryDark,
+  },
+
+  /* Activity Card */
+  activityCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  activityTimeText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    minWidth: 70,
+  },
+  activityPillCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  activityInfoCol: {
+    flex: 1,
+  },
+  activityMedName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  activityDosageText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  activitySubDetailText: {
+    fontSize: 11,
     color: colors.textMuted,
+    marginTop: 2,
+  },
+
+  /* Status Pills */
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusPillTaken: {
+    backgroundColor: "#DCFCE7",
+  },
+  statusPillSkipped: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusPillSnoozed: {
+    backgroundColor: "#E0F2FE",
+  },
+  statusPillPending: {
+    backgroundColor: "#FEF3C7",
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  statusPillTextTaken: {
+    color: "#16A34A",
+  },
+  statusPillTextSkipped: {
+    color: "#DC2626",
+  },
+  statusPillTextSnoozed: {
+    color: "#0284C7",
+  },
+  statusPillTextPending: {
+    color: "#D97706",
+  },
+
+  /* Loader & Empty */
+  loaderBox: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginTop: 10,
+  },
+  emptyIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#F0FDFA",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
     textAlign: "center",
+    marginTop: 6,
+    lineHeight: 18,
   },
 });

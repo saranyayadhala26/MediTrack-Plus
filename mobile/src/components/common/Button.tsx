@@ -1,6 +1,6 @@
 /**
- * Accessible, High-Contrast Reusable Button Component
- * Adheres to WCAG minimum 48px touch targets for elderly users.
+ * Reusable MediTrack+ Button Component
+ * Primary teal, white text, rounded corners, minimum 44px touch target.
  */
 
 import React from "react";
@@ -11,20 +11,22 @@ import {
   ActivityIndicator,
   ViewStyle,
   TextStyle,
+  StyleProp,
 } from "react-native";
 import { colors, typography, borderRadius, accessibility, spacing } from "../../constants/theme";
 
-type ButtonVariant = "primary" | "secondary" | "outline" | "danger" | "text";
+export type ButtonVariant = "primary" | "secondary" | "outline" | "danger" | "text";
 
-interface ButtonProps {
+export interface ButtonProps {
   title: string;
   onPress: () => void;
   variant?: ButtonVariant;
   disabled?: boolean;
   loading?: boolean;
-  style?: ViewStyle;
-  textStyle?: TextStyle;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
   icon?: React.ReactNode;
+  accessibilityLabel?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -36,6 +38,7 @@ export const Button: React.FC<ButtonProps> = ({
   style,
   textStyle,
   icon,
+  accessibilityLabel,
 }) => {
   const getContainerStyle = (): ViewStyle => {
     switch (variant) {
@@ -79,7 +82,7 @@ export const Button: React.FC<ButtonProps> = ({
         style,
       ]}
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={accessibilityLabel || title}
       accessibilityState={{ disabled: disabled || loading }}
     >
       {loading ? (
@@ -99,25 +102,35 @@ export const Button: React.FC<ButtonProps> = ({
   );
 };
 
+export const PrimaryButton: React.FC<Omit<ButtonProps, "variant">> = (props) => (
+  <Button variant="primary" {...props} />
+);
+
+export const SecondaryButton: React.FC<Omit<ButtonProps, "variant">> = (props) => (
+  <Button variant="outline" {...props} />
+);
+
 const styles = StyleSheet.create({
   baseContainer: {
-    minHeight: accessibility.minTouchTarget,
-    borderRadius: borderRadius.md,
+    minHeight: accessibility.minTouchTarget, // 44px
+    borderRadius: borderRadius.md, // 10px
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.xl,
   },
   primaryContainer: {
     backgroundColor: colors.primary,
   },
   secondaryContainer: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.primarySubtle,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
   },
   outlineContainer: {
     backgroundColor: "transparent",
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: colors.primary,
   },
   dangerContainer: {
@@ -125,29 +138,35 @@ const styles = StyleSheet.create({
   },
   textContainer: {
     backgroundColor: "transparent",
-    minHeight: accessibility.minTouchTarget - 8,
     paddingHorizontal: spacing.sm,
+    minHeight: accessibility.minTouchTarget,
   },
   disabledContainer: {
-    opacity: 0.5,
+    backgroundColor: colors.border,
+    borderColor: colors.border,
+    opacity: 0.6,
   },
   primaryText: {
-    ...typography.h3,
+    ...typography.body,
+    fontWeight: "700",
     color: colors.textInverse,
     textAlign: "center",
   },
   secondaryText: {
-    ...typography.h3,
-    color: colors.textInverse,
+    ...typography.body,
+    fontWeight: "700",
+    color: colors.primaryDark,
     textAlign: "center",
   },
   outlineText: {
-    ...typography.h3,
+    ...typography.body,
+    fontWeight: "700",
     color: colors.primary,
     textAlign: "center",
   },
   dangerText: {
-    ...typography.h3,
+    ...typography.body,
+    fontWeight: "700",
     color: colors.textInverse,
     textAlign: "center",
   },

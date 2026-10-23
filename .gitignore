@@ -75,3 +75,5 @@ Thumbs.db
 emulator_*.png
 screen.png
 
+# Gradle build cache
+**/.gradle/

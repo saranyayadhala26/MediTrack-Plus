@@ -16,6 +16,7 @@ import {
 import { getMedicineById } from "../api/medicines";
 import { getSchedules } from "../api/schedules";
 import { borderRadius, colors, spacing, typography } from "../constants/theme";
+import { Ionicons } from "@expo/vector-icons";
 import { HomeScreen } from "../screens/main/HomeScreen";
 import { AddMedicineScreen } from "../screens/medicines/AddMedicineScreen";
 import { EditMedicineScreen } from "../screens/medicines/EditMedicineScreen";
@@ -31,6 +32,7 @@ import { PatientMonitoringDetailScreen } from "../screens/caregivers/PatientMoni
 import { CaregiverAlertsScreen } from "../screens/caregivers/CaregiverAlertsScreen";
 import { ProfileScreen } from "../screens/profile/ProfileScreen";
 import { ReportsScreen } from "../screens/reports/ReportsScreen";
+import { AdherenceSummaryScreen } from "../screens/adherence/AdherenceSummaryScreen";
 import { DoseAlarmModal, DoseAlarmData } from "../components/activities/DoseAlarmModal";
 import { notificationService } from "../services/notificationService";
 import { LinkedPatient, MedicationSchedule, Medicine } from "../types";
@@ -65,6 +67,9 @@ export const MainAppNavigator: React.FC = () => {
   // Reports navigation state (Phase 11 Step 9)
   const [isReportsOpen, setIsReportsOpen] = useState<boolean>(false);
   const [reportsPatientId, setReportsPatientId] = useState<string | undefined>(undefined);
+
+  // Adherence Summary navigation state
+  const [isAdherenceOpen, setIsAdherenceOpen] = useState<boolean>(false);
 
   // Medication Alarm state (Phase 10.2)
   const [alarmData, setAlarmData] = useState<DoseAlarmData | null>(null);
@@ -221,9 +226,32 @@ export const MainAppNavigator: React.FC = () => {
         return (
           <CaregiverAlertsScreen
             initialPatientId={selectedPatient?.patientId}
+            onBack={() => setCaregiverTab("dashboard")}
+            onSelectPatient={(patient) => {
+              setSelectedPatient(patient);
+              setCaregiverTab("dashboard");
+            }}
           />
         );
       }
+    }
+
+    // Dedicated Adherence Summary Experience
+    if (isAdherenceOpen) {
+      return (
+        <AdherenceSummaryScreen
+          onBack={() => setIsAdherenceOpen(false)}
+          onNavigateToHistory={() => {
+            setIsAdherenceOpen(false);
+            setActiveTab("history");
+          }}
+          onNavigateToReports={() => {
+            setReportsPatientId(undefined);
+            setIsReportsOpen(true);
+          }}
+          hideBottomNav={true}
+        />
+      );
     }
 
     // Patient Experience
@@ -237,6 +265,9 @@ export const MainAppNavigator: React.FC = () => {
             setReportsPatientId(undefined);
             setIsReportsOpen(true);
           }}
+          onNavigateToCalendar={() => setActiveTab("calendar")}
+          onNavigateToHistory={() => setActiveTab("history")}
+          onNavigateToAdherence={() => setIsAdherenceOpen(true)}
         />
       );
     }
@@ -246,7 +277,7 @@ export const MainAppNavigator: React.FC = () => {
     }
 
     if (activeTab === "history") {
-      return <ActivityHistoryScreen />;
+      return <ActivityHistoryScreen onBack={() => setActiveTab("dashboard")} />;
     }
 
     if (activeTab === "caregivers") {
@@ -386,10 +417,7 @@ export const MainAppNavigator: React.FC = () => {
         isCaregiver ? (
           <View style={styles.tabBar}>
             <TouchableOpacity
-              style={[
-                styles.tabButton,
-                caregiverTab === "dashboard" && styles.tabButtonActive,
-              ]}
+              style={styles.tabButton}
               onPress={() => {
                 setCaregiverTab("dashboard");
                 setSelectedPatient(null);
@@ -398,16 +426,11 @@ export const MainAppNavigator: React.FC = () => {
               accessibilityState={{ selected: caregiverTab === "dashboard" }}
               accessibilityLabel="Patients Dashboard Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  caregiverTab === "dashboard"
-                    ? styles.tabIconActive
-                    : styles.tabIconInactive,
-                ]}
-              >
-                👥
-              </Text>
+              <Ionicons
+                name={caregiverTab === "dashboard" ? "people" : "people-outline"}
+                size={22}
+                color={caregiverTab === "dashboard" ? colors.primary : "#94A3B8"}
+              />
               <Text
                 style={[
                   styles.tabLabel,
@@ -418,28 +441,27 @@ export const MainAppNavigator: React.FC = () => {
               >
                 Patients
               </Text>
+              <View
+                style={
+                  caregiverTab === "dashboard"
+                    ? styles.activeIndicator
+                    : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[
-                styles.tabButton,
-                caregiverTab === "alerts" && styles.tabButtonActive,
-              ]}
+              style={styles.tabButton}
               onPress={() => setCaregiverTab("alerts")}
               accessibilityRole="tab"
               accessibilityState={{ selected: caregiverTab === "alerts" }}
               accessibilityLabel="Caregiver Alerts Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  caregiverTab === "alerts"
-                    ? styles.tabIconActive
-                    : styles.tabIconInactive,
-                ]}
-              >
-                🔔
-              </Text>
+              <Ionicons
+                name={caregiverTab === "alerts" ? "notifications" : "notifications-outline"}
+                size={22}
+                color={caregiverTab === "alerts" ? colors.primary : "#94A3B8"}
+              />
               <Text
                 style={[
                   styles.tabLabel,
@@ -450,136 +472,189 @@ export const MainAppNavigator: React.FC = () => {
               >
                 Alerts
               </Text>
+              <View
+                style={
+                  caregiverTab === "alerts"
+                    ? styles.activeIndicator
+                    : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.tabBar}>
+            {/* 1. Home */}
             <TouchableOpacity
-              style={[styles.tabButton, activeTab === "dashboard" && styles.tabButtonActive]}
-              onPress={() => setActiveTab("dashboard")}
+              style={styles.tabButton}
+              onPress={() => {
+                setActiveTab("dashboard");
+                setIsProfileOpen(false);
+                setIsReportsOpen(false);
+                setIsAdherenceOpen(false);
+              }}
               accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "dashboard" }}
-              accessibilityLabel="Dashboard Tab"
+              accessibilityState={{
+                selected: activeTab === "dashboard" && !isProfileOpen && !isReportsOpen,
+              }}
+              accessibilityLabel="Home Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  activeTab === "dashboard" ? styles.tabIconActive : styles.tabIconInactive,
-                ]}
-              >
-                🏠
-              </Text>
+              <Ionicons
+                name={
+                  activeTab === "dashboard" && !isProfileOpen && !isReportsOpen
+                    ? "home"
+                    : "home-outline"
+                }
+                size={22}
+                color={
+                  activeTab === "dashboard" && !isProfileOpen && !isReportsOpen
+                    ? colors.primary
+                    : "#94A3B8"
+                }
+              />
               <Text
                 style={[
                   styles.tabLabel,
-                  activeTab === "dashboard" ? styles.tabLabelActive : styles.tabLabelInactive,
+                  activeTab === "dashboard" && !isProfileOpen && !isReportsOpen
+                    ? styles.tabLabelActive
+                    : styles.tabLabelInactive,
                 ]}
               >
-                Dashboard
+                Home
               </Text>
+              <View
+                style={
+                  activeTab === "dashboard" && !isProfileOpen && !isReportsOpen
+                    ? styles.activeIndicator
+                    : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
 
+            {/* 2. Medicines */}
             <TouchableOpacity
-              style={[styles.tabButton, activeTab === "calendar" && styles.tabButtonActive]}
-              onPress={() => setActiveTab("calendar")}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "calendar" }}
-              accessibilityLabel="Medication Calendar Tab"
-            >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  activeTab === "calendar" ? styles.tabIconActive : styles.tabIconInactive,
-                ]}
-              >
-                📅
-              </Text>
-              <Text
-                style={[
-                  styles.tabLabel,
-                  activeTab === "calendar" ? styles.tabLabelActive : styles.tabLabelInactive,
-                ]}
-              >
-                Calendar
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === "medicines" && styles.tabButtonActive]}
+              style={styles.tabButton}
               onPress={() => {
                 setActiveTab("medicines");
                 setMedicineMode("list");
+                setIsProfileOpen(false);
+                setIsReportsOpen(false);
+                setIsAdherenceOpen(false);
               }}
               accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "medicines" }}
+              accessibilityState={{
+                selected: activeTab === "medicines" && !isProfileOpen && !isReportsOpen,
+              }}
               accessibilityLabel="Medicines Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  activeTab === "medicines" ? styles.tabIconActive : styles.tabIconInactive,
-                ]}
-              >
-                💊
-              </Text>
+              <Ionicons
+                name={
+                  activeTab === "medicines" && !isProfileOpen && !isReportsOpen
+                    ? "medkit"
+                    : "medkit-outline"
+                }
+                size={22}
+                color={
+                  activeTab === "medicines" && !isProfileOpen && !isReportsOpen
+                    ? colors.primary
+                    : "#94A3B8"
+                }
+              />
               <Text
                 style={[
                   styles.tabLabel,
-                  activeTab === "medicines" ? styles.tabLabelActive : styles.tabLabelInactive,
+                  activeTab === "medicines" && !isProfileOpen && !isReportsOpen
+                    ? styles.tabLabelActive
+                    : styles.tabLabelInactive,
                 ]}
               >
                 Medicines
               </Text>
+              <View
+                style={
+                  activeTab === "medicines" && !isProfileOpen && !isReportsOpen
+                    ? styles.activeIndicator
+                    : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
 
+            {/* 3. Calendar */}
             <TouchableOpacity
-              style={[styles.tabButton, activeTab === "history" && styles.tabButtonActive]}
-              onPress={() => setActiveTab("history")}
+              style={styles.tabButton}
+              onPress={() => {
+                setActiveTab("calendar");
+                setIsProfileOpen(false);
+                setIsReportsOpen(false);
+                setIsAdherenceOpen(false);
+              }}
               accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "history" }}
-              accessibilityLabel="Activity History Tab"
+              accessibilityState={{
+                selected: activeTab === "calendar" && !isProfileOpen && !isReportsOpen,
+              }}
+              accessibilityLabel="Medication Calendar Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  activeTab === "history" ? styles.tabIconActive : styles.tabIconInactive,
-                ]}
-              >
-                📋
-              </Text>
+              <Ionicons
+                name={
+                  activeTab === "calendar" && !isProfileOpen && !isReportsOpen
+                    ? "calendar"
+                    : "calendar-outline"
+                }
+                size={22}
+                color={
+                  activeTab === "calendar" && !isProfileOpen && !isReportsOpen
+                    ? colors.primary
+                    : "#94A3B8"
+                }
+              />
               <Text
                 style={[
                   styles.tabLabel,
-                  activeTab === "history" ? styles.tabLabelActive : styles.tabLabelInactive,
+                  activeTab === "calendar" && !isProfileOpen && !isReportsOpen
+                    ? styles.tabLabelActive
+                    : styles.tabLabelInactive,
                 ]}
               >
-                History
+                Calendar
               </Text>
+              <View
+                style={
+                  activeTab === "calendar" && !isProfileOpen && !isReportsOpen
+                    ? styles.activeIndicator
+                    : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
 
+            {/* 4. Profile */}
             <TouchableOpacity
-              style={[styles.tabButton, activeTab === "caregivers" && styles.tabButtonActive]}
-              onPress={() => setActiveTab("caregivers")}
+              style={styles.tabButton}
+              onPress={() => {
+                setIsProfileOpen(true);
+                setIsReportsOpen(false);
+                setIsAdherenceOpen(false);
+              }}
               accessibilityRole="tab"
-              accessibilityState={{ selected: activeTab === "caregivers" }}
-              accessibilityLabel="Caregivers Tab"
+              accessibilityState={{ selected: isProfileOpen }}
+              accessibilityLabel="Profile Tab"
             >
-              <Text
-                style={[
-                  styles.tabIcon,
-                  activeTab === "caregivers" ? styles.tabIconActive : styles.tabIconInactive,
-                ]}
-              >
-                👥
-              </Text>
+              <Ionicons
+                name={isProfileOpen ? "person" : "person-outline"}
+                size={22}
+                color={isProfileOpen ? colors.primary : "#94A3B8"}
+              />
               <Text
                 style={[
                   styles.tabLabel,
-                  activeTab === "caregivers" ? styles.tabLabelActive : styles.tabLabelInactive,
+                  isProfileOpen ? styles.tabLabelActive : styles.tabLabelInactive,
                 ]}
               >
-                Caregivers
+                Profile
               </Text>
+              <View
+                style={
+                  isProfileOpen ? styles.activeIndicator : styles.inactiveIndicator
+                }
+              />
             </TouchableOpacity>
           </View>
         )
@@ -642,13 +717,29 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     ...typography.caption,
-    fontWeight: "600",
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: "500",
   },
   tabLabelActive: {
-    color: colors.primaryDark,
+    color: colors.primary,
     fontWeight: "700",
   },
   tabLabelInactive: {
-    color: colors.textMuted,
+    color: "#94A3B8",
+    fontWeight: "500",
+  },
+  activeIndicator: {
+    width: 16,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+    marginTop: 3,
+  },
+  inactiveIndicator: {
+    width: 16,
+    height: 3,
+    backgroundColor: "transparent",
+    marginTop: 3,
   },
 });

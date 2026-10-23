@@ -39,6 +39,10 @@ export const RootNavigator: React.FC = () => {
           <LoginScreen
             onNavigateToRegister={() => setAuthMode("register")}
             onNavigateToForgotPassword={() => setAuthMode("forgot-password")}
+            onNavigateToVerifyEmail={(email) => {
+              setVerificationEmail(email);
+              setAuthMode("verify-email");
+            }}
           />
         )}
         {authMode === "register" && (

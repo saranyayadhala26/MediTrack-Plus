@@ -1,6 +1,7 @@
 """Unit and integration tests for Email Verification OTP & Password Reset OTP (Batch 1)."""
 
 from datetime import datetime, timedelta, timezone
+import re
 import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -296,7 +297,9 @@ async def test_verify_reset_otp_endpoint_and_password_reset_flow():
 
         last_msg = email_svc.get_last_message()
         assert last_msg is not None
-        reset_otp = last_msg.subject.split("Code: ")[-1].strip()
+        match = re.search(r"\b(\d{6})\b", last_msg.subject or last_msg.text_body)
+        assert match is not None
+        reset_otp = match.group(1)
         assert len(reset_otp) == 6
 
         # 3. Test invalid code on verify-reset-otp

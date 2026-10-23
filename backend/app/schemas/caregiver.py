@@ -21,8 +21,11 @@ class CaregiverBase(BaseModel):
     relationship: str = Field(..., min_length=2, max_length=50, description="Relationship to patient", examples=["Daughter"])
 
 
-class CaregiverCreate(CaregiverBase):
-    pass
+class CaregiverCreate(BaseModel):
+    caregiverEmail: EmailStr = Field(..., description="Caregiver contact email address", examples=["caregiver@example.com"])
+    caregiverName: Optional[str] = Field(None, min_length=2, max_length=100, description="Caregiver full name", examples=["Dr. John Smith"])
+    caregiverPhone: Optional[str] = Field(None, min_length=5, max_length=30, description="Caregiver phone number", examples=["+1-555-0144"])
+    relationship: Optional[str] = Field(None, min_length=2, max_length=50, description="Relationship to patient", examples=["Daughter"])
 
 
 class CaregiverUpdate(BaseModel):

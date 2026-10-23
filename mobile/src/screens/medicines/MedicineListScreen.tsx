@@ -1,35 +1,49 @@
 /**
- * Medicine List Screen (Phase 4).
- * Displays accessible medication cards, inventory warnings, pull-to-refresh,
- * search/filter, and navigation to Detail and Add screens.
+ * Medicine List Screen for MediTrack+
+ * Redesigned to match the finalized MediTrack+ UI design reference.
  */
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Platform,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { getMedicationActivities } from "../../api/activities";
 import { getMedicines } from "../../api/medicines";
-import { Button } from "../../components/common/Button";
-import { Card } from "../../components/common/Card";
-import { EmptyState } from "../../components/common/EmptyState";
-import { ErrorState } from "../../components/common/ErrorState";
-import { LoadingState } from "../../components/common/LoadingState";
-import { config } from "../../constants/config";
-import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { getSchedules } from "../../api/schedules";
 import { useAuth } from "../../context/AuthContext";
-import { Medicine } from "../../types";
+import { MedicationActivity, MedicationSchedule, Medicine } from "../../types";
+import { EmptyState, ErrorState, LoadingState } from "../../components/common";
 
 interface MedicineListScreenProps {
   onSelectMedicine: (medicine: Medicine) => void;
   onAddMedicine: () => void;
+}
+
+type FilterTab = "All" | "Active" | "Low stock" | "Out of stock";
+
+function formatScheduleTime(timeStr?: string): string {
+  if (!timeStr) return "";
+  const parts = timeStr.split(":");
+  if (parts.length < 2) return timeStr;
+  const hour = parseInt(parts[0], 10);
+  const min = parseInt(parts[1], 10);
+  if (isNaN(hour) || isNaN(min)) return timeStr;
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const formattedHour = hour % 12 || 12;
+  const formattedMin = String(min).padStart(2, "0");
+  return `${formattedHour}:${formattedMin} ${ampm}`;
 }
 
 export const MedicineListScreen: React.FC<MedicineListScreenProps> = ({
@@ -40,50 +54,164 @@ export const MedicineListScreen: React.FC<MedicineListScreenProps> = ({
   const isCaregiver = user?.role === "caregiver";
 
   const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [schedules, setSchedules] = useState<MedicationSchedule[]>([]);
+  const [todayActivities, setTodayActivities] = useState<MedicationActivity[]>([]);
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchMedicines = useCallback(async (showLoading = true) => {
-    if (showLoading) setIsLoading(true);
-    setError(null);
-    try {
-      if (isCaregiver) {
-        // Caregiver role has no direct CRUD
-        setMedicines([]);
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedFilter, setSelectedFilter] = useState<FilterTab>("All");
+
+  const todayDate = new Date();
+  const todayStr = todayDate.toISOString().split("T")[0];
+
+  const fetchData = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) setIsLoading(true);
+      setError(null);
+      try {
+        if (isCaregiver) {
+          setMedicines([]);
+          setSchedules([]);
+          setIsLoading(false);
+          return;
+        }
+
+        const [medRes, schedRes, actRes] = await Promise.allSettled([
+          getMedicines(),
+          getSchedules(),
+          getMedicationActivities({ startDate: todayStr, endDate: todayStr }),
+        ]);
+
+        if (medRes.status === "fulfilled") {
+          setMedicines(medRes.value.items || []);
+        } else {
+          const err: any = medRes.reason;
+          setError(
+            err?.response?.data?.detail ||
+              err?.message ||
+              "Unable to load prescribed medicines."
+          );
+        }
+
+        if (schedRes.status === "fulfilled") {
+          setSchedules(schedRes.value.items || []);
+        }
+
+        if (actRes.status === "fulfilled") {
+          setTodayActivities(actRes.value || []);
+        }
+      } catch (err: any) {
+        setError(err?.message || "Unable to load data.");
+      } finally {
         setIsLoading(false);
-        return;
+        setIsRefreshing(false);
       }
-      const data = await getMedicines();
-      setMedicines(data.items || []);
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.detail ||
-        err?.message ||
-        "Unable to load prescribed medicines. Please check your network connection.";
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [isCaregiver]);
+    },
+    [isCaregiver, todayStr]
+  );
 
   useEffect(() => {
-    fetchMedicines();
-  }, [fetchMedicines]);
+    fetchData();
+  }, [fetchData]);
 
   const onRefresh = () => {
     setIsRefreshing(true);
-    fetchMedicines(false);
+    fetchData(false);
   };
 
+  // Filter & Search Logic
+  const filteredMedicines = medicines.filter((med) => {
+    // 1. Search Query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const nameMatch = med.name?.toLowerCase().includes(q);
+      const instructionsMatch = med.instructions?.toLowerCase().includes(q);
+      if (!nameMatch && !instructionsMatch) return false;
+    }
+
+    // 2. Filter Tab
+    const isOutOfStock =
+      med.inventory !== undefined && med.inventory !== null && med.inventory <= 0;
+    const isLowStock =
+      !isOutOfStock &&
+      med.inventory !== undefined &&
+      med.inventory !== null &&
+      med.refillThreshold !== undefined &&
+      med.refillThreshold !== null &&
+      med.inventory <= med.refillThreshold;
+
+    if (selectedFilter === "Out of stock") {
+      return isOutOfStock;
+    }
+    if (selectedFilter === "Low stock") {
+      return isLowStock;
+    }
+    if (selectedFilter === "Active") {
+      return !isOutOfStock;
+    }
+    return true;
+  });
+
   const renderMedicineItem = ({ item }: { item: Medicine }) => {
-    const isLowInventory =
+    const isOutOfStock =
+      item.inventory !== undefined && item.inventory !== null && item.inventory <= 0;
+    const isLowStock =
+      !isOutOfStock &&
       item.inventory !== undefined &&
       item.inventory !== null &&
       item.refillThreshold !== undefined &&
       item.refillThreshold !== null &&
       item.inventory <= item.refillThreshold;
+
+    // Associated Schedules
+    const medSchedules = schedules.filter(
+      (s) => s.medicineId === item.id && s.enabled !== false
+    );
+    const sortedSchedules = [...medSchedules].sort((a, b) =>
+      (a.time || "").localeCompare(b.time || "")
+    );
+
+    const currentTimeStr = `${String(todayDate.getHours()).padStart(2, "0")}:${String(
+      todayDate.getMinutes()
+    ).padStart(2, "0")}`;
+
+    const upcomingSched = sortedSchedules.find((s) => (s.time || "") >= currentTimeStr);
+    const nextSched = upcomingSched || sortedSchedules[0];
+    const nextDoseTime = nextSched ? formatScheduleTime(nextSched.time) : null;
+
+    // Status Pill determination
+    let statusText:
+      | "Upcoming"
+      | "Pending"
+      | "Taken"
+      | "Low stock"
+      | "Out of stock"
+      | "Active" = "Active";
+
+    if (isOutOfStock) {
+      statusText = "Out of stock";
+    } else if (isLowStock) {
+      statusText = "Low stock";
+    } else {
+      const isTakenToday = todayActivities.some(
+        (a) => a.medicineId === item.id && a.action === "Taken"
+      );
+      if (isTakenToday) {
+        statusText = "Taken";
+      } else if (nextSched) {
+        if ((nextSched.time || "") < currentTimeStr) {
+          statusText = "Pending";
+        } else {
+          statusText = "Upcoming";
+        }
+      } else {
+        statusText = "Active";
+      }
+    }
 
     return (
       <TouchableOpacity
@@ -92,132 +220,243 @@ export const MedicineListScreen: React.FC<MedicineListScreenProps> = ({
         accessibilityRole="button"
         accessibilityLabel={`View details for ${item.name}`}
       >
-        <Card style={styles.medicineCard}>
-          <View style={styles.cardHeader}>
-            <View style={styles.nameContainer}>
+        <View style={styles.medicineCard}>
+          {/* Top Row: Icon + Name/Dosage/Freq + Status Pill & Chevron */}
+          <View style={styles.cardTopRow}>
+            {/* Left: Medicine Icon Container */}
+            <View style={styles.medicineIconBox}>
+              <Ionicons name="medkit-outline" size={22} color="#0D9488" />
+            </View>
+
+            {/* Center: Details */}
+            <View style={styles.medicineInfoCol}>
               <Text style={styles.medicineName} numberOfLines={1}>
                 {item.name}
               </Text>
-              <Text style={styles.dosageBadge}>
-                {item.dosage} {item.dosageUnit}
+              <Text style={styles.medicineDosage} numberOfLines={1}>
+                {item.dosage} {item.dosageUnit ? `• 1 ${item.dosageUnit}` : ""}
+              </Text>
+              <Text style={styles.medicineFrequency} numberOfLines={1}>
+                {item.frequency || "Daily"}
               </Text>
             </View>
-            <Text style={styles.chevron}>›</Text>
-          </View>
 
-          <View style={styles.cardDetails}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Frequency:</Text>
-              <Text style={styles.detailValue}>{item.frequency}</Text>
-            </View>
-
-            {item.instructions ? (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Instructions:</Text>
-                <Text style={styles.detailValue} numberOfLines={1}>
-                  {item.instructions}
-                </Text>
-              </View>
-            ) : null}
-
-            {/* Inventory count & low stock warning badge */}
-            <View style={styles.inventoryRow}>
-              {item.inventory !== undefined && item.inventory !== null ? (
-                <View
+            {/* Right: Status Pill & Chevron */}
+            <View style={styles.cardRightCol}>
+              <View
+                style={[
+                  styles.statusPill,
+                  statusText === "Upcoming"
+                    ? styles.statusPillUpcoming
+                    : statusText === "Pending"
+                    ? styles.statusPillPending
+                    : statusText === "Taken"
+                    ? styles.statusPillTaken
+                    : statusText === "Low stock"
+                    ? styles.statusPillLowStock
+                    : statusText === "Out of stock"
+                    ? styles.statusPillOutOfStock
+                    : styles.statusPillActive,
+                ]}
+              >
+                <Text
                   style={[
-                    styles.inventoryBadge,
-                    isLowInventory ? styles.inventoryLowBadge : styles.inventoryNormalBadge,
+                    styles.statusPillText,
+                    statusText === "Upcoming"
+                      ? styles.statusPillTextUpcoming
+                      : statusText === "Pending"
+                      ? styles.statusPillTextPending
+                      : statusText === "Taken"
+                      ? styles.statusPillTextTaken
+                      : statusText === "Low stock"
+                      ? styles.statusPillTextLowStock
+                      : statusText === "Out of stock"
+                      ? styles.statusPillTextOutOfStock
+                      : styles.statusPillTextActive,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.inventoryText,
-                      isLowInventory ? styles.inventoryLowText : styles.inventoryNormalText,
-                    ]}
-                  >
-                    {isLowInventory
-                      ? `⚠️ Low Supply: ${item.inventory} left (Refill at ${item.refillThreshold})`
-                      : `In Stock: ${item.inventory} units`}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.noInventoryText}>Supply tracking not configured</Text>
-              )}
+                  {statusText}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#94A3B8" style={styles.chevron} />
             </View>
           </View>
-        </Card>
+
+          {/* Thin Divider */}
+          <View style={styles.cardDivider} />
+
+          {/* Bottom Row: Next dose (Left) + Remaining Quantity (Right) */}
+          <View style={styles.cardBottomRow}>
+            <View style={styles.bottomMetaItem}>
+              <Ionicons name="time-outline" size={15} color="#0D9488" style={{ marginRight: 5 }} />
+              <Text style={styles.bottomMetaLabel}>Next dose: </Text>
+              <Text style={styles.bottomMetaValue}>
+                {nextDoseTime || "No schedule"}
+              </Text>
+            </View>
+
+            <View style={styles.bottomMetaItem}>
+              <Ionicons
+                name="cube-outline"
+                size={15}
+                color={isOutOfStock ? "#DC2626" : isLowStock ? "#D97706" : "#64748B"}
+                style={{ marginRight: 5 }}
+              />
+              <Text
+                style={[
+                  styles.bottomMetaValue,
+                  isOutOfStock
+                    ? styles.bottomMetaValueCritical
+                    : isLowStock
+                    ? styles.bottomMetaValueWarning
+                    : undefined,
+                ]}
+              >
+                {item.inventory !== undefined && item.inventory !== null
+                  ? `${item.inventory} ${item.dosageUnit || "units"} left`
+                  : "Supply untracked"}
+              </Text>
+            </View>
+          </View>
+        </View>
       </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Screen Header */}
+      {/* 1. TOP HEADER */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>My Medicines</Text>
-          <Text style={styles.headerSubtitle}>
-            {medicines.length} {medicines.length === 1 ? "medicine" : "medicines"} prescribed
-          </Text>
-        </View>
-
-        {!isCaregiver && (
-          <Button
-            title="+ Add Medicine"
-            onPress={onAddMedicine}
-            variant="secondary"
-            style={styles.addButton}
-            textStyle={styles.addButtonText}
-          />
-        )}
+        <Text style={styles.brandTitle}>
+          <Text style={styles.brandTeal}>MediTrack</Text>
+          <Text style={styles.brandPlus}>+</Text>
+        </Text>
+        <Text style={styles.pageTitle}>Medicines</Text>
+        <Text style={styles.pageSubtitle}>Manage your medications and schedules.</Text>
       </View>
 
-      {/* Caregiver Notice */}
-      {isCaregiver && (
-        <View style={styles.caregiverNotice}>
-          <Text style={styles.caregiverNoticeTitle}>Caregiver Mode</Text>
-          <Text style={styles.caregiverNoticeText}>
-            Medicine management is managed exclusively by the patient. You have read-only access to adherence logs.
-          </Text>
-        </View>
-      )}
-
-      {/* Content */}
-      {isLoading ? (
-        <LoadingState message="Loading your prescribed medicines..." />
-      ) : error ? (
-        <ErrorState message={error} onRetry={() => fetchMedicines(true)} />
-      ) : medicines.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <EmptyState
-            title="No Medicines Added"
-            description="Keep all your prescriptions organized in one secure place. Tap the button below to add your first medicine."
-            actionTitle={isCaregiver ? undefined : "Add First Medicine"}
-            onActionPress={isCaregiver ? undefined : onAddMedicine}
+      {/* 2. SEARCH BAR */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search-outline" size={20} color="#94A3B8" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search medicines"
+            placeholderTextColor="#94A3B8"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            accessibilityLabel="Search medicines"
           />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearchQuery("")}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            </TouchableOpacity>
+          )}
         </View>
+      </View>
+
+      {/* 3. FILTER TABS */}
+      <View style={styles.filterTabsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterTabsContent}
+        >
+          {(["All", "Active", "Low stock", "Out of stock"] as FilterTab[]).map((tab) => {
+            const isSelected = selectedFilter === tab;
+            return (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.filterTab,
+                  isSelected ? styles.filterTabSelected : styles.filterTabUnselected,
+                ]}
+                onPress={() => setSelectedFilter(tab)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${tab} filter`}
+              >
+                <Text
+                  style={[
+                    styles.filterTabText,
+                    isSelected ? styles.filterTabTextSelected : styles.filterTabTextUnselected,
+                  ]}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* 4 & 5. MEDICINE LIST */}
+      {isLoading ? (
+        <LoadingState skeleton={true} skeletonVariant="cards" skeletonCount={4} />
+      ) : error ? (
+        <ErrorState
+          variant="data_load"
+          title="Couldn't load your medicines"
+          message={error}
+          onRetry={() => fetchData(true)}
+        />
+      ) : filteredMedicines.length === 0 ? (
+        searchQuery || selectedFilter !== "All" ? (
+          <EmptyState
+            variant="custom"
+            iconName="search-outline"
+            title="No matching medicines"
+            description="Try adjusting your search terms or filter selection."
+            actionTitle="Reset Filters"
+            onActionPress={() => {
+              setSearchQuery("");
+              setSelectedFilter("All");
+            }}
+          />
+        ) : (
+          <EmptyState
+            variant="medicines"
+            actionTitle={!isCaregiver ? "+ Add Medicine" : undefined}
+            onActionPress={!isCaregiver ? onAddMedicine : undefined}
+          />
+        )
       ) : (
         <FlatList
-          data={medicines}
+          data={filteredMedicines}
           keyExtractor={(item) => item.id}
           renderItem={renderMedicineItem}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={onRefresh}
-              colors={[colors.primary]}
-              tintColor={colors.primary}
+              colors={["#0D9488"]}
+              tintColor="#0D9488"
             />
           }
-          ListFooterComponent={
-            <View style={styles.disclaimerBox}>
-              <Text style={styles.disclaimerText}>⚠️ {config.medicalDisclaimer}</Text>
-            </View>
-          }
         />
+      )}
+
+      {/* 8. FLOATING CIRCULAR "+" BUTTON */}
+      {medicines.length > 0 && !isCaregiver && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={onAddMedicine}
+          accessibilityRole="button"
+          accessibilityLabel="Add Medicine"
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </TouchableOpacity>
       )}
     </SafeAreaView>
   );
@@ -226,175 +465,367 @@ export const MedicineListScreen: React.FC<MedicineListScreenProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#FFFFFF",
   },
+
+  /* 1. Top Header */
   header: {
-    backgroundColor: colors.primary,
-    paddingTop:
-      Platform.OS === "android"
-        ? (StatusBar.currentHeight || 24) + spacing.md
-        : spacing.lg,
-    paddingBottom: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomLeftRadius: borderRadius.lg,
-    borderBottomRightRadius: borderRadius.lg,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 8 : 12,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
-  headerTitle: {
-    ...typography.h2,
-    color: colors.textInverse,
-    fontWeight: "700",
+  brandTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+    marginBottom: 6,
   },
-  headerSubtitle: {
-    ...typography.caption,
-    color: colors.primaryLight,
+  brandTeal: {
+    color: "#0D9488",
+  },
+  brandPlus: {
+    color: "#0D9488",
+  },
+  pageTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+  pageSubtitle: {
+    fontSize: 14,
+    color: "#64748B",
     marginTop: 2,
   },
-  addButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    minHeight: 38,
-    minWidth: 120,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.full,
+
+  /* 2. Search Bar */
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 10,
+    backgroundColor: "#F8FAFC",
   },
-  addButtonText: {
-    ...typography.caption,
-    color: colors.primaryDark,
-    fontWeight: "700",
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 46,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
   },
-  caregiverNotice: {
-    backgroundColor: colors.secondaryLight,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.secondary,
-    padding: spacing.md,
-    margin: spacing.md,
-    borderRadius: borderRadius.md,
+  searchIcon: {
+    marginRight: 8,
   },
-  caregiverNoticeTitle: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.secondaryDark,
-    marginBottom: 2,
-  },
-  caregiverNoticeText: {
-    ...typography.small,
-    color: colors.textSecondary,
-  },
-  emptyContainer: {
+  searchInput: {
     flex: 1,
-    padding: spacing.lg,
-    justifyContent: "center",
+    fontSize: 15,
+    color: "#0F172A",
+    paddingVertical: 0,
   },
+
+  /* 3. Filter Tabs */
+  filterTabsContainer: {
+    backgroundColor: "#F8FAFC",
+    paddingBottom: 12,
+  },
+  filterTabsContent: {
+    paddingHorizontal: 20,
+    gap: 8,
+    flexDirection: "row",
+  },
+  filterTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    minHeight: 34,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  filterTabSelected: {
+    backgroundColor: "#0D9488",
+  },
+  filterTabUnselected: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  filterTabText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  filterTabTextSelected: {
+    color: "#FFFFFF",
+  },
+  filterTabTextUnselected: {
+    color: "#64748B",
+  },
+
+  /* 4 & 5. Medicine Cards */
   listContent: {
-    padding: spacing.md,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 88,
   },
   medicineCard: {
-    marginBottom: spacing.md,
-    padding: spacing.lg,
-    borderRadius: borderRadius.lg,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
   },
-  cardHeader: {
+  cardTopRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-    paddingBottom: spacing.sm,
-    marginBottom: spacing.sm,
   },
-  nameContainer: {
+  medicineIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#F0FDFA",
+    borderWidth: 1,
+    borderColor: "#CCFBF1",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  medicineInfoCol: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: spacing.sm,
+    marginRight: 8,
   },
   medicineName: {
-    ...typography.h3,
-    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  medicineDosage: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  medicineFrequency: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  cardRightCol: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  statusPillUpcoming: {
+    backgroundColor: "#E0F2FE",
+  },
+  statusPillPending: {
+    backgroundColor: "#FEF3C7",
+  },
+  statusPillTaken: {
+    backgroundColor: "#DCFCE7",
+  },
+  statusPillLowStock: {
+    backgroundColor: "#FEF3C7",
+  },
+  statusPillOutOfStock: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusPillActive: {
+    backgroundColor: "#F0FDFA",
+  },
+  statusPillText: {
+    fontSize: 11,
     fontWeight: "700",
   },
-  dosageBadge: {
-    ...typography.caption,
-    backgroundColor: colors.primaryLight,
-    color: colors.primaryDark,
-    fontWeight: "700",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
+  statusPillTextUpcoming: {
+    color: "#0284C7",
+  },
+  statusPillTextPending: {
+    color: "#B45309",
+  },
+  statusPillTextTaken: {
+    color: "#15803D",
+  },
+  statusPillTextLowStock: {
+    color: "#B45309",
+  },
+  statusPillTextOutOfStock: {
+    color: "#DC2626",
+  },
+  statusPillTextActive: {
+    color: "#0D9488",
   },
   chevron: {
-    fontSize: 24,
-    color: colors.textMuted,
-    fontWeight: "300",
-    marginLeft: spacing.sm,
+    marginLeft: 2,
   },
-  cardDetails: {
-    gap: spacing.xs,
+  cardDivider: {
+    height: 1,
+    backgroundColor: "#F1F5F9",
+    marginTop: 12,
+    marginBottom: 10,
   },
-  detailRow: {
+  cardBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  detailLabel: {
-    ...typography.caption,
-    color: colors.textMuted,
+  bottomMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
   },
-  detailValue: {
-    ...typography.caption,
+  bottomMetaLabel: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  bottomMetaValue: {
+    fontSize: 12,
+    color: "#0F172A",
     fontWeight: "600",
-    color: colors.textSecondary,
+  },
+  bottomMetaValueWarning: {
+    color: "#B45309",
+  },
+  bottomMetaValueCritical: {
+    color: "#DC2626",
+  },
+
+  /* 7. Empty State */
+  emptyContainer: {
     flex: 1,
-    textAlign: "right",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 64,
   },
-  inventoryRow: {
-    marginTop: spacing.xs,
-  },
-  inventoryBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.sm,
-  },
-  inventoryNormalBadge: {
-    backgroundColor: colors.surfaceSubtle,
-  },
-  inventoryLowBadge: {
-    backgroundColor: colors.skippedLight,
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#F0FDFA",
     borderWidth: 1,
-    borderColor: colors.skipped,
+    borderColor: "#99F6E4",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  inventoryText: {
-    ...typography.small,
-    fontWeight: "600",
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginTop: 16,
   },
-  inventoryNormalText: {
-    color: colors.textSecondary,
+  emptyDescription: {
+    fontSize: 14,
+    color: "#64748B",
+    textAlign: "center",
+    marginTop: 6,
+    lineHeight: 20,
   },
-  inventoryLowText: {
-    color: colors.skipped,
+  emptyPrimaryButton: {
+    backgroundColor: "#0D9488",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginTop: 20,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
     fontWeight: "700",
   },
-  noInventoryText: {
-    ...typography.small,
-    color: colors.textMuted,
-    fontStyle: "italic",
+  emptySecondaryButton: {
+    backgroundColor: "#F1F5F9",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
-  disclaimerBox: {
-    padding: spacing.md,
-    marginTop: spacing.md,
-    backgroundColor: "#FEF2F2",
-    borderRadius: borderRadius.md,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.error,
+  emptySecondaryButtonText: {
+    color: "#0D9488",
+    fontSize: 14,
+    fontWeight: "600",
   },
-  disclaimerText: {
-    ...typography.small,
-    color: colors.textSecondary,
-    lineHeight: 18,
+
+  /* Loading & Error */
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 64,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: "#64748B",
+    marginTop: 12,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    paddingVertical: 64,
+  },
+  errorText: {
+    fontSize: 14,
+    color: "#DC2626",
+    textAlign: "center",
+    marginTop: 12,
+    lineHeight: 20,
+  },
+  retryButton: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#0D9488",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: "#0D9488",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  /* 8. Floating Action Button */
+  fab: {
+    position: "absolute",
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#0D9488",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: "#0D9488",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
   },
 });

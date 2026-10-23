@@ -1,7 +1,6 @@
 /**
- * Medicine Detail Screen (Phase 4).
- * Displays full clinical details, intake directions, duration dates,
- * inventory/refill alerts, mandatory medical disclaimer, and actions (Edit / Delete).
+ * Medicine Detail Screen for MediTrack+
+ * Redesigned to match the finalized MediTrack+ UI design reference (page 29 of ui.pdf).
  */
 
 import React, { useEffect, useState } from "react";
@@ -13,22 +12,20 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { deleteMedicine, getMedicineById } from "../../api/medicines";
 import { deleteSchedule, getSchedules, updateSchedule } from "../../api/schedules";
 import { getActivitiesByMedicine } from "../../api/activities";
-import { Button } from "../../components/common/Button";
-import { Card } from "../../components/common/Card";
-import { DoseActionCard } from "../../components/activities/DoseActionCard";
-import { ScheduleCard } from "../../components/schedules/ScheduleCard";
-import { config } from "../../constants/config";
-import { borderRadius, colors, spacing, typography } from "../../constants/theme";
+import { colors, spacing } from "../../constants/theme";
 import { useAuth } from "../../context/AuthContext";
 import { notificationService } from "../../services/notificationService";
 import { MedicationActivity, MedicationSchedule, Medicine } from "../../types";
+import { InlineError } from "../../components/common";
 
 interface MedicineDetailScreenProps {
   medicine: Medicine;
@@ -44,25 +41,20 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
   onBack,
   onEdit,
   onDeleted,
-  onAddSchedule,
-  onEditSchedule,
 }) => {
   const { user } = useAuth();
   const isCaregiver = user?.role === "caregiver";
 
   const [currentMed, setCurrentMed] = useState<Medicine>(medicine);
   const [schedules, setSchedules] = useState<MedicationSchedule[]>([]);
-  const [isLoadingSchedules, setIsLoadingSchedules] = useState<boolean>(false);
-  const [activities, setActivities] = useState<MedicationActivity[]>([]);
-  const [isLoadingActivities, setIsLoadingActivities] = useState<boolean>(false);
+  const [, setIsLoadingSchedules] = useState<boolean>(false);
+  const [, setActivities] = useState<MedicationActivity[]>([]);
+  const [, setIsLoadingActivities] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setCurrentMed(medicine);
-  }, [medicine]);
-
+  // Load activities and refresh medicine
   const loadActivities = () => {
     setIsLoadingActivities(true);
     getActivitiesByMedicine(currentMed.id)
@@ -70,13 +62,16 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
       .catch(() => {})
       .finally(() => setIsLoadingActivities(false));
 
-    // Refresh medicine to reflect updated inventory after doses are taken
     getMedicineById(currentMed.id)
       .then((updated) => {
         if (updated) setCurrentMed(updated);
       })
       .catch(() => {});
   };
+
+  useEffect(() => {
+    setCurrentMed(medicine);
+  }, [medicine]);
 
   useEffect(() => {
     if (!isCaregiver) {
@@ -106,51 +101,21 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
     }
   };
 
-  const handleDeleteSchedule = (sched: MedicationSchedule) => {
-    Alert.alert("Delete Reminder", `Delete reminder for ${sched.time}?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteSchedule(sched.id);
-            setSchedules((prev) => prev.filter((s) => s.id !== sched.id));
-            try {
-              await notificationService.cancelScheduleReminder(sched.id);
-              await notificationService.autoSync({ force: true });
-            } catch (notifErr) {
-              console.warn("Failed to cancel schedule reminder:", notifErr);
-            }
-          } catch {
-            Alert.alert("Error", "Failed to delete schedule.");
-          }
-        },
-      },
-    ]);
-  };
-
-  const isLowInventory =
-    currentMed.inventory !== undefined &&
-    currentMed.inventory !== null &&
-    currentMed.refillThreshold !== undefined &&
-    currentMed.refillThreshold !== null &&
-    currentMed.inventory <= currentMed.refillThreshold;
-
   const performDelete = async () => {
     setShowConfirmModal(false);
     setIsDeleting(true);
     setDeleteError(null);
     try {
       await deleteMedicine(currentMed.id);
-      // Cancel local reminders for all schedules linked to this deleted medicine
       for (const s of schedules) {
         notificationService.cancelScheduleReminder(s.id).catch(() => {});
       }
       await notificationService.autoSync({ force: true }).catch(() => {});
-      Alert.alert("Deleted", `"${currentMed.name}" has been removed from your list.`, [
-        { text: "OK", onPress: onDeleted },
-      ]);
+      Alert.alert(
+        "Deleted",
+        `"${currentMed.name}" has been removed from your list.`,
+        [{ text: "OK", onPress: onDeleted }]
+      );
     } catch (err: any) {
       const msg =
         err?.response?.data?.detail ||
@@ -163,15 +128,90 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
   };
 
   const handleDeletePress = () => {
-    // Cross-platform delete confirmation (Modal for web/testing and Alert for native)
     setShowConfirmModal(true);
   };
 
+  // ----- UI calculation helpers -----
+  const todayDate = new Date();
+  const currentTimeStr = `${String(todayDate.getHours()).padStart(2, "0")}:${String(
+    todayDate.getMinutes()
+  ).padStart(2, "0")}`;
+
+  const sortedSchedules = [...schedules]
+    .filter((s) => s.enabled !== false)
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  const upcoming = sortedSchedules.find((s) => (s.time || "") >= currentTimeStr);
+  const nextSchedule = upcoming || sortedSchedules[0];
+
+  const formatTime = (time?: string) => {
+    if (!time) return "";
+    const [h, m] = time.split(":");
+    const hour = parseInt(h, 10);
+    const minute = parseInt(m, 10);
+    if (isNaN(hour) || isNaN(minute)) return time;
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const formattedHour = hour % 12 || 12;
+    return `${formattedHour}:${String(minute).padStart(2, "0")} ${ampm}`;
+  };
+
+  const formatDisplayDate = (dateStr?: string) => {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const months = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      ];
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = months[d.getMonth()];
+      const year = d.getFullYear();
+      return `${day} ${month} ${year}`;
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const calculateDays = (startStr?: string, endStr?: string): number | null => {
+    if (!startStr || !endStr) return null;
+    try {
+      const s = new Date(startStr);
+      const e = new Date(endStr);
+      const diff = e.getTime() - s.getTime();
+      if (isNaN(diff) || diff < 0) return null;
+      return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    } catch {
+      return null;
+    }
+  };
+
+  const formatFormName = (unit?: string) => {
+    if (!unit) return "Tablet";
+    const lower = unit.toLowerCase();
+    if (lower === "tablet" || lower === "tablets") return "Tablet";
+    if (lower === "capsule" || lower === "capsules") return "Capsule";
+    return unit.charAt(0).toUpperCase() + unit.slice(1);
+  };
+
+  const isLowInventory =
+    currentMed.inventory !== undefined &&
+    currentMed.inventory !== null &&
+    currentMed.refillThreshold !== undefined &&
+    currentMed.refillThreshold !== null &&
+    currentMed.inventory <= currentMed.refillThreshold;
+
+  const hasSupply = currentMed.inventory !== undefined && currentMed.inventory !== null;
+  const inventoryCount = currentMed.inventory ?? 0;
+  const refillThreshold = currentMed.refillThreshold ?? 15;
+  const supplyMax = Math.max(inventoryCount, refillThreshold * 2, 30);
+  const supplyPercent = Math.min(100, Math.max(0, Math.round((inventoryCount / supplyMax) * 100)));
+  const durationDays = calculateDays(currentMed.startDate, currentMed.endDate);
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      {/* Screen Header */}
+      {/* 1. Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
@@ -180,309 +220,237 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
           accessibilityRole="button"
           accessibilityLabel="Back to medicines"
         >
-          <Text style={styles.backText}>‹ Back</Text>
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {medicine.name}
-        </Text>
-        <View style={styles.headerSpacer} />
+        <Text style={styles.headerTitle}>Medicine Details</Text>
+        <TouchableOpacity
+          onPress={() => onEdit(currentMed)}
+          style={styles.headerEditButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Edit medicine"
+        >
+          <Ionicons name="create-outline" size={18} color={colors.primary} />
+          <Text style={styles.headerEditText}>Edit</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Medical Safety Notice */}
-        <View style={styles.disclaimerBox}>
-          <Text style={styles.disclaimerTitle}>⚠️ Medical Safety Notice</Text>
-          <Text style={styles.disclaimerText}>{config.medicalDisclaimer}</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Error banner for delete failures */}
+        {deleteError ? (
+          <InlineError
+            title="Couldn't delete medicine"
+            subtitle={deleteError}
+            onDismiss={() => setDeleteError(null)}
+            onRetry={performDelete}
+          />
+        ) : null}
+
+        {/* 2. Hero Card */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroIconBox}>
+            <MaterialCommunityIcons name="pill" size={32} color={colors.primary} />
+          </View>
+          <View style={styles.heroInfo}>
+            <Text style={styles.medName} numberOfLines={1}>
+              {currentMed.name}
+            </Text>
+            <Text style={styles.strengthText} numberOfLines={1}>
+              {currentMed.dosage} {currentMed.dosageUnit}  •  {formatFormName(currentMed.dosageUnit)}
+            </Text>
+            <View style={styles.activeBadge}>
+              <Text style={styles.activeBadgeText}>Active</Text>
+            </View>
+          </View>
         </View>
 
-        {deleteError && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{deleteError}</Text>
-          </View>
-        )}
-
-        {/* Primary Overview Card */}
-        <Card style={styles.card}>
-          <View style={styles.titleRow}>
-            <View style={styles.titleInfo}>
-              <Text style={styles.medName}>{medicine.name}</Text>
-              <Text style={styles.strengthText}>
-                {medicine.dosage} {medicine.dosageUnit}
-              </Text>
+        {/* 3. Next Dose Card */}
+        {nextSchedule ? (
+          <View style={styles.sectionCard}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.sectionTitle}>Next dose</Text>
+              <View style={styles.todayChip}>
+                <Text style={styles.todayChipText}>Today</Text>
+              </View>
             </View>
-            <View style={styles.frequencyBadge}>
-              <Text style={styles.frequencyBadgeText}>{medicine.frequency}</Text>
+            <View style={styles.nextDoseRow}>
+              <View style={styles.nextDoseIconCircle}>
+                <Ionicons name="time-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.nextDoseInfo}>
+                <Text style={styles.nextDoseTime}>{formatTime(nextSchedule.time)}</Text>
+                <Text style={styles.nextDoseMedicine}>{currentMed.name}</Text>
+                <Text style={styles.nextDoseStrength}>
+                  {currentMed.dosage} {currentMed.dosageUnit}  •  1 {currentMed.dosageUnit || "tablet"}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </View>
           </View>
-        </Card>
+        ) : null}
 
-        {/* Clinical Directions Card */}
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>Prescription Directions</Text>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Intake Frequency:</Text>
-            <Text style={styles.rowValue}>{medicine.frequency}</Text>
-          </View>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Dosage per intake:</Text>
-            <Text style={styles.rowValue}>
-              {medicine.dosage} {medicine.dosageUnit}
-            </Text>
-          </View>
-
-          {medicine.instructions ? (
-            <View style={styles.instructionsBox}>
-              <Text style={styles.instructionsTitle}>Special Instructions:</Text>
-              <Text style={styles.instructionsText}>{medicine.instructions}</Text>
+        {/* 4. Schedule Card */}
+        <View style={styles.sectionCard}>
+          <View style={styles.cardRowHeader}>
+            <View style={[styles.tileIconContainer, { backgroundColor: "#E0F2FE" }]}>
+              <Ionicons name="calendar-outline" size={20} color="#0284C7" />
             </View>
-          ) : (
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Special Instructions:</Text>
-              <Text style={styles.rowValueMuted}>None provided</Text>
+            <View style={styles.tileTextCol}>
+              <Text style={styles.sectionTitle}>Schedule</Text>
+              <Text style={styles.sectionSubTitle}>{currentMed.frequency || "Every day"}</Text>
             </View>
-          )}
-
-          {/* Schedule Duration */}
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Course Duration:</Text>
-            <Text style={styles.rowValue}>
-              {medicine.startDate || "Ongoing"} {medicine.endDate ? `→ ${medicine.endDate}` : ""}
-            </Text>
           </View>
-        </Card>
-
-        {/* Today's Dose Actions Card (Phase 7) */}
-        {!isCaregiver && schedules.some((s) => s.enabled) && (
-          <Card style={styles.card}>
-            <Text style={styles.sectionTitle}>Today's Dose Actions</Text>
-            <Text style={styles.doseActionSubtitle}>
-              Record your intake for scheduled doses today:
-            </Text>
-            {schedules
-              .filter((s) => s.enabled)
-              .map((sched) => {
-                const todayStr = new Date().toISOString().split("T")[0];
-                const existingActivity = activities.find(
-                  (a) =>
-                    a.scheduleId === sched.id &&
-                    (a.scheduledDate === todayStr || a.actionTime?.startsWith(todayStr))
-                );
-                return (
-                  <DoseActionCard
-                    key={sched.id}
-                    schedule={sched}
-                    medicine={currentMed}
-                    existingActivity={existingActivity}
-                    onActivityRecorded={loadActivities}
+          {sortedSchedules.length > 0 ? (
+            <View style={styles.timeChipsContainer}>
+              {sortedSchedules.map((s) => (
+                <View key={s.id} style={styles.timeChip}>
+                  <Ionicons
+                    name="time-outline"
+                    size={15}
+                    color={colors.primaryDark}
+                    style={{ marginRight: 6 }}
                   />
-                );
-              })}
-          </Card>
-        )}
-
-        {/* Reminder Schedules Card */}
-        <Card style={styles.card}>
-          <View style={styles.schedulesHeaderRow}>
-            <Text style={styles.sectionTitle}>Reminder Schedules</Text>
-            {!isCaregiver && onAddSchedule && (
-              <Button
-                title="+ Add Time"
-                onPress={() => onAddSchedule(medicine)}
-                variant="outline"
-                style={styles.addTimeButton}
-              />
-            )}
-          </View>
-
-          {isLoadingSchedules ? (
-            <Text style={styles.loadingSchedulesText}>Loading reminder times...</Text>
-          ) : schedules.length === 0 ? (
-            <View style={styles.emptySchedulesBox}>
-              <Text style={styles.emptySchedulesTitle}>No Reminders Set</Text>
-              <Text style={styles.emptySchedulesText}>
-                Configure intake times to ensure you never miss a dose.
-              </Text>
-              {!isCaregiver && onAddSchedule && (
-                <Button
-                  title="+ Set Reminder Schedule"
-                  onPress={() => onAddSchedule(medicine)}
-                  variant="primary"
-                  style={styles.setScheduleButton}
-                />
-              )}
-            </View>
-          ) : (
-            <View style={styles.schedulesList}>
-              {schedules.map((sched) => (
-                <ScheduleCard
-                  key={sched.id}
-                  schedule={sched}
-                  showMedicineName={false}
-                  onToggleEnabled={handleToggleSchedule}
-                  onEdit={isCaregiver ? undefined : onEditSchedule}
-                  onDelete={isCaregiver ? undefined : handleDeleteSchedule}
-                />
+                  <Text style={styles.timeChipText}>{formatTime(s.time)}</Text>
+                </View>
               ))}
             </View>
+          ) : (
+            <Text style={styles.fallbackText}>No scheduled times set</Text>
           )}
-        </Card>
+        </View>
 
-        {/* Supply & Inventory Status Card */}
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>Supply & Refill Status</Text>
+        {/* 5. How to Take Card */}
+        <View style={styles.sectionCard}>
+          <View style={styles.cardRowHeader}>
+            <View style={[styles.tileIconContainer, { backgroundColor: "#EDE9FE" }]}>
+              <Ionicons name="restaurant-outline" size={20} color="#7C3AED" />
+            </View>
+            <View style={styles.tileTextCol}>
+              <Text style={styles.sectionTitle}>How to take</Text>
+              <Text style={styles.sectionSubTitle}>
+                {currentMed.instructions || "Take after food"}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-          {currentMed.inventory !== undefined && currentMed.inventory !== null ? (
-            <View>
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>Units Remaining:</Text>
-                <Text
-                  style={[
-                    styles.rowValueBold,
-                    isLowInventory ? styles.lowStockText : styles.inStockText,
-                  ]}
-                >
-                  {currentMed.inventory} {currentMed.dosageUnit}(s)
-                </Text>
-              </View>
+        {/* 6. Treatment Duration Card */}
+        <View style={styles.sectionCard}>
+          <View style={styles.cardRowHeader}>
+            <View style={[styles.tileIconContainer, { backgroundColor: "#DCFCE7" }]}>
+              <Ionicons name="calendar-outline" size={20} color="#16A34A" />
+            </View>
+            <View style={styles.tileTextCol}>
+              <Text style={styles.sectionTitle}>Treatment duration</Text>
+              <Text style={styles.sectionSubTitle}>
+                {currentMed.startDate && currentMed.endDate
+                  ? `${formatDisplayDate(currentMed.startDate)}  -  ${formatDisplayDate(currentMed.endDate)}`
+                  : currentMed.startDate
+                  ? `From ${formatDisplayDate(currentMed.startDate)}`
+                  : "Ongoing"}
+              </Text>
+              {durationDays ? (
+                <Text style={styles.sectionSubCaption}>{durationDays} days</Text>
+              ) : null}
+            </View>
+          </View>
+        </View>
 
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>Refill Alert Level:</Text>
-                <Text style={styles.rowValue}>
-                  {currentMed.refillThreshold !== undefined && currentMed.refillThreshold !== null
-                    ? `${currentMed.refillThreshold} ${currentMed.dosageUnit}(s)`
-                    : "Not configured"}
-                </Text>
-              </View>
-
-              {isLowInventory && (
-                <View style={styles.lowStockWarning}>
-                  <Text style={styles.lowStockWarningText}>
-                    ⚠️ Low Supply Warning: Current count ({currentMed.inventory}) is at or below
-                    your refill threshold ({currentMed.refillThreshold}). Please order a refill soon.
+        {/* 7. Medicine Supply Card */}
+        <View style={styles.sectionCard}>
+          <View style={styles.cardRowHeader}>
+            <View style={[styles.tileIconContainer, { backgroundColor: "#FEF3C7" }]}>
+              <Ionicons name="cube-outline" size={20} color="#D97706" />
+            </View>
+            <View style={styles.tileTextCol}>
+              <Text style={styles.sectionTitle}>Medicine supply</Text>
+              {hasSupply ? (
+                <>
+                  <View style={styles.supplyCountRow}>
+                    <Text style={styles.supplyCountLeft}>
+                      {currentMed.inventory} {currentMed.dosageUnit || "tablet"}
+                      {currentMed.inventory === 1 ? "" : "s"} remaining
+                    </Text>
+                    <Text style={styles.supplyCountRight}>
+                      {currentMed.inventory} / {supplyMax}
+                    </Text>
+                  </View>
+                  <View style={styles.progressBarTrack}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        { width: `${supplyPercent}%` },
+                        isLowInventory ? { backgroundColor: colors.warning } : null,
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.supplyCaption}>
+                    Keep this updated to track your remaining medicine.
                   </Text>
-                </View>
+                </>
+              ) : (
+                <Text style={styles.sectionSubTitle}>
+                  Supply tracking is not enabled for this medicine.
+                </Text>
               )}
             </View>
-          ) : (
-            <Text style={styles.noSupplyText}>
-              Supply tracking is not enabled for this medicine. You can edit this medicine to track inventory.
-            </Text>
-          )}
-        </Card>
-
-        {/* Recent Dose History Card (Phase 7) */}
-        <Card style={styles.card}>
-          <View style={styles.schedulesHeaderRow}>
-            <Text style={styles.sectionTitle}>Recent Dose History</Text>
-            {isLoadingActivities && (
-              <Text style={styles.loadingSchedulesText}>Updating...</Text>
-            )}
           </View>
-          {activities.length === 0 ? (
-            <Text style={styles.noActivitiesText}>
-              No dose logs recorded yet for this medicine.
-            </Text>
-          ) : (
-            <View style={styles.activitiesList}>
-              {activities.slice(0, 5).map((act) => {
-                const actionBadgeColor =
-                  act.action === "Taken"
-                    ? colors.taken
-                    : act.action === "Skipped"
-                    ? colors.skipped
-                    : colors.snoozed;
-                return (
-                  <View key={act.id} style={styles.activityItem}>
-                    <View style={styles.activityHeaderRow}>
-                      <View
-                        style={[
-                          styles.actionBadge,
-                          { backgroundColor: actionBadgeColor },
-                        ]}
-                      >
-                        <Text style={styles.actionBadgeText}>{act.action}</Text>
-                      </View>
-                      <Text style={styles.activityTimeText}>
-                        {new Date(act.actionTime).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                        {" • "}
-                        {new Date(act.actionTime).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </Text>
-                    </View>
-                    {act.skipReason ? (
-                      <Text style={styles.activitySkipReason}>
-                        Reason: {act.skipReason}
-                      </Text>
-                    ) : null}
-                    {act.wasSnoozed ? (
-                      <Text style={styles.activitySnoozeNote}>
-                        ⏰ Previously snoozed {act.snoozeCount || 1} time(s)
-                      </Text>
-                    ) : null}
-                  </View>
-                );
-              })}
+        </View>
+
+        {/* 8. Reminder Card */}
+        <View style={styles.sectionCard}>
+          <View style={styles.reminderRow}>
+            <View style={[styles.tileIconContainer, { backgroundColor: "#CCFBF1" }]}>
+              <Ionicons name="notifications-outline" size={20} color={colors.primary} />
             </View>
-          )}
-        </Card>
-
-        {/* Metadata Card */}
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>Record Information</Text>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Added On:</Text>
-            <Text style={styles.rowValue}>
-              {new Date(medicine.createdAt).toLocaleDateString(undefined, {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
-            </Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Last Updated:</Text>
-            <Text style={styles.rowValue}>
-              {new Date(medicine.updatedAt).toLocaleDateString(undefined, {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
-            </Text>
-          </View>
-        </Card>
-
-        {/* Patient Actions: Edit & Delete */}
-        {!isCaregiver ? (
-          <View style={styles.actionButtonsContainer}>
-            <Button
-              title="Edit Medicine Details"
-              onPress={() => onEdit(medicine)}
-              variant="outline"
-              style={styles.actionButton}
-            />
-
-            <Button
-              title={isDeleting ? "Deleting..." : "Delete Medicine"}
-              onPress={handleDeletePress}
-              variant="danger"
-              loading={isDeleting}
-              style={styles.actionButton}
+            <View style={styles.reminderTextCol}>
+              <Text style={styles.sectionTitle}>Reminder</Text>
+              <Text style={styles.sectionSubTitle}>Medication reminders</Text>
+              <Text style={styles.supplyCaption}>
+                You'll be reminded when it's time to take this medicine.
+              </Text>
+            </View>
+            <Switch
+              value={schedules.some((s) => s.enabled)}
+              onValueChange={() => {
+                schedules.forEach((s) => handleToggleSchedule(s));
+              }}
+              trackColor={{ false: "#CBD5E1", true: colors.primary }}
+              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
             />
           </View>
-        ) : (
-          <View style={styles.caregiverNotice}>
-            <Text style={styles.caregiverNoticeText}>
-              Caregiver accounts have read-only access to medication schedules.
+        </View>
+
+        {/* 9. Action Buttons */}
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity
+            style={styles.primaryActionButton}
+            onPress={() => onEdit(currentMed)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Edit Medicine"
+          >
+            <Ionicons name="create-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={styles.primaryActionButtonText}>Edit Medicine</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.deleteActionButton}
+            onPress={handleDeletePress}
+            disabled={isDeleting}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Delete Medicine"
+          >
+            <Ionicons name="trash-outline" size={18} color={colors.danger} style={{ marginRight: 8 }} />
+            <Text style={styles.deleteActionButtonText}>
+              {isDeleting ? "Deleting..." : "Delete Medicine"}
             </Text>
-          </View>
-        )}
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
       {/* Delete Confirmation Modal */}
@@ -496,22 +464,24 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Delete Medicine?</Text>
             <Text style={styles.modalBody}>
-              Are you sure you want to permanently delete "{medicine.name}"? This action cannot be
+              Are you sure you want to permanently delete "{currentMed.name}"? This action cannot be
               undone.
             </Text>
             <View style={styles.modalActions}>
-              <Button
-                title="Cancel"
-                onPress={() => setShowConfirmModal(false)}
-                variant="outline"
+              <TouchableOpacity
                 style={styles.modalCancelButton}
-              />
-              <Button
-                title="Delete"
-                onPress={performDelete}
-                variant="danger"
+                onPress={() => setShowConfirmModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.modalDeleteButton}
-              />
+                onPress={performDelete}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalDeleteButtonText}>Delete</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -523,338 +493,390 @@ export const MedicineDetailScreen: React.FC<MedicineDetailScreenProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: "#F8FAFC",
   },
   header: {
-    backgroundColor: colors.primary,
-    paddingTop:
-      Platform.OS === "android"
-        ? (StatusBar.currentHeight || 24) + spacing.md
-        : spacing.md,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.lg,
+    backgroundColor: "#FFFFFF",
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 8 : 12,
+    paddingBottom: 12,
+    paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
   },
   backButton: {
-    minHeight: 44,
-    minWidth: 60,
+    minWidth: 40,
+    height: 40,
     justifyContent: "center",
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-  },
-  backText: {
-    ...typography.body,
-    color: colors.textInverse,
-    fontWeight: "700",
   },
   headerTitle: {
-    ...typography.h3,
-    color: colors.textInverse,
+    fontSize: 18,
     fontWeight: "700",
-    flex: 1,
-    textAlign: "center",
+    color: colors.textPrimary,
   },
-  headerSpacer: {
-    width: 60,
+  headerEditButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    minWidth: 40,
+    height: 40,
+    justifyContent: "flex-end",
+  },
+  headerEditText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.primary,
+    marginLeft: 4,
   },
   scrollContent: {
-    padding: spacing.md,
-  },
-  disclaimerBox: {
-    backgroundColor: "#FEF2F2",
-    borderLeftWidth: 4,
-    borderLeftColor: colors.error,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  disclaimerTitle: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.error,
-    marginBottom: 2,
-  },
-  disclaimerText: {
-    ...typography.small,
-    color: colors.textSecondary,
-    lineHeight: 18,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   errorBanner: {
-    backgroundColor: colors.skippedLight,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.skipped,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FEE2E2",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
   },
   errorBannerText: {
-    ...typography.caption,
-    color: colors.skipped,
-    fontWeight: "600",
+    flex: 1,
+    fontSize: 13,
+    color: colors.danger,
+    fontWeight: "500",
   },
-  card: {
-    marginBottom: spacing.md,
-    padding: spacing.lg,
-    borderRadius: borderRadius.lg,
-  },
-  titleRow: {
+
+  /* 2. Hero Card */
+  heroCard: {
+    backgroundColor: "#F0FDFA",
+    borderWidth: 1,
+    borderColor: "#CCFBF1",
+    borderRadius: 16,
+    padding: 16,
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
+    marginBottom: 14,
   },
-  titleInfo: {
+  heroIconBox: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CCFBF1",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+  },
+  heroInfo: {
     flex: 1,
   },
   medName: {
-    ...typography.h1,
-    color: colors.textPrimary,
+    fontSize: 20,
     fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: -0.3,
   },
   strengthText: {
-    ...typography.h3,
-    color: colors.primary,
-    fontWeight: "600",
-    marginTop: 2,
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 3,
+    marginBottom: 8,
   },
-  frequencyBadge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
+  activeBadge: {
+    backgroundColor: "#16A34A",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 3,
     alignSelf: "flex-start",
   },
-  frequencyBadgeText: {
-    ...typography.caption,
+  activeBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  /* Section Cards */
+  sectionCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  todayChip: {
+    backgroundColor: "#CCFBF1",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  todayChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.primaryDark,
+  },
+
+  /* Next Dose */
+  nextDoseRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  nextDoseIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#CCFBF1",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  nextDoseInfo: {
+    flex: 1,
+  },
+  nextDoseTime: {
+    fontSize: 18,
     fontWeight: "700",
     color: colors.primaryDark,
   },
-  sectionTitle: {
-    ...typography.h3,
-    color: colors.textPrimary,
-    marginBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
-    paddingBottom: spacing.xs,
-  },
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: spacing.xs,
-  },
-  rowLabel: {
-    ...typography.body,
-    color: colors.textMuted,
-  },
-  rowValue: {
-    ...typography.body,
+  nextDoseMedicine: {
+    fontSize: 14,
     fontWeight: "600",
-    color: colors.textSecondary,
-  },
-  rowValueBold: {
-    ...typography.body,
-    fontWeight: "700",
-  },
-  rowValueMuted: {
-    ...typography.body,
-    color: colors.textMuted,
-    fontStyle: "italic",
-  },
-  inStockText: {
-    color: colors.taken,
-  },
-  lowStockText: {
-    color: colors.skipped,
-  },
-  instructionsBox: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginVertical: spacing.xs,
-  },
-  instructionsTitle: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.textSecondary,
-    marginBottom: 2,
-  },
-  instructionsText: {
-    ...typography.body,
     color: colors.textPrimary,
-    lineHeight: 22,
+    marginTop: 2,
   },
-  lowStockWarning: {
-    backgroundColor: colors.skippedLight,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginTop: spacing.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.skipped,
+  nextDoseStrength: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
-  lowStockWarningText: {
-    ...typography.caption,
-    color: colors.skipped,
+
+  /* Icon Tile Header Cards (Schedule, How to take, Duration, Supply) */
+  cardRowHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  tileIconContainer: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  tileTextCol: {
+    flex: 1,
+  },
+  sectionSubTitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  sectionSubCaption: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  fallbackText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontStyle: "italic",
+    marginTop: 8,
+  },
+
+  /* Schedule Time Chips */
+  timeChipsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  timeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  timeChipText: {
+    fontSize: 13,
     fontWeight: "600",
-    lineHeight: 20,
+    color: colors.textPrimary,
   },
-  noSupplyText: {
-    ...typography.body,
-    color: colors.textMuted,
-    fontStyle: "italic",
-  },
-  actionButtonsContainer: {
-    marginTop: spacing.md,
-    marginBottom: spacing.xxl,
-    gap: spacing.md,
-  },
-  actionButton: {
-    width: "100%",
-  },
-  caregiverNotice: {
-    backgroundColor: colors.secondaryLight,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    marginTop: spacing.md,
-  },
-  caregiverNoticeText: {
-    ...typography.caption,
-    color: colors.secondaryDark,
-    textAlign: "center",
-  },
-  schedulesHeaderRow: {
+
+  /* Medicine Supply */
+  supplyCountRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.sm,
+    marginTop: 6,
   },
-  addTimeButton: {
-    paddingHorizontal: spacing.md,
-    minHeight: 36,
+  supplyCountLeft: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.textPrimary,
   },
-  loadingSchedulesText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    fontStyle: "italic",
-    paddingVertical: spacing.sm,
-  },
-  emptySchedulesBox: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: "center",
-    marginVertical: spacing.xs,
-  },
-  emptySchedulesTitle: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.textSecondary,
-    marginBottom: 2,
-  },
-  emptySchedulesText: {
-    ...typography.small,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginBottom: spacing.sm,
-  },
-  setScheduleButton: {
-    minWidth: 160,
-  },
-  schedulesList: {
-    marginTop: spacing.xs,
-  },
-  doseActionSubtitle: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  noActivitiesText: {
-    ...typography.body,
-    color: colors.textMuted,
-    fontStyle: "italic",
-    paddingVertical: spacing.sm,
-  },
-  activitiesList: {
-    marginTop: spacing.xs,
-    gap: spacing.sm,
-  },
-  activityItem: {
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
-  },
-  activityHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 4,
-  },
-  actionBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  actionBadgeText: {
-    ...typography.caption,
-    fontWeight: "700",
-    color: colors.textInverse,
-  },
-  activityTimeText: {
-    ...typography.caption,
-    color: colors.textMuted,
+  supplyCountRight: {
+    fontSize: 13,
     fontWeight: "500",
+    color: colors.textSecondary,
   },
-  activitySkipReason: {
-    ...typography.caption,
-    color: colors.skipped,
-    fontStyle: "italic",
-    marginTop: 2,
+  progressBarTrack: {
+    height: 8,
+    backgroundColor: "#E2E8F0",
+    borderRadius: 4,
+    marginTop: 8,
+    overflow: "hidden",
   },
-  activitySnoozeNote: {
-    ...typography.caption,
-    color: colors.snoozed,
-    fontWeight: "600",
-    marginTop: 2,
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 4,
   },
+  supplyCaption: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 16,
+  },
+
+  /* Reminder */
+  reminderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  reminderTextCol: {
+    flex: 1,
+    marginRight: 10,
+  },
+
+  /* Action Buttons */
+  actionButtonsContainer: {
+    marginTop: 8,
+    marginBottom: 24,
+    gap: 12,
+  },
+  primaryActionButton: {
+    backgroundColor: colors.primary,
+    height: 48,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  primaryActionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  deleteActionButton: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    height: 48,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteActionButtonText: {
+    color: colors.danger,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  /* Modal */
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
     justifyContent: "center",
     alignItems: "center",
     padding: spacing.lg,
   },
   modalCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    padding: spacing.xl,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 20,
     width: "100%",
-    maxWidth: 400,
+    maxWidth: 360,
     elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
   },
   modalTitle: {
-    ...typography.h2,
-    color: colors.textPrimary,
+    fontSize: 18,
     fontWeight: "700",
-    marginBottom: spacing.sm,
+    color: colors.textPrimary,
+    marginBottom: 8,
   },
   modalBody: {
-    ...typography.body,
+    fontSize: 14,
     color: colors.textSecondary,
-    marginBottom: spacing.xl,
-    lineHeight: 22,
+    marginBottom: 20,
+    lineHeight: 20,
   },
   modalActions: {
     flexDirection: "row",
-    gap: spacing.md,
+    gap: 10,
     justifyContent: "flex-end",
   },
   modalCancelButton: {
     flex: 1,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.textSecondary,
   },
   modalDeleteButton: {
     flex: 1,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: colors.danger,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalDeleteButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 });
